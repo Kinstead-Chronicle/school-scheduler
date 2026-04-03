@@ -680,18 +680,23 @@ function SetupPage({ state, setState }) {
 
       <div className="card">
         <div className="card-title">Period Schedule</div>
-        <div style={{display:'grid', gridTemplateColumns:'80px 1fr 110px 110px', gap:'8px', padding:'8px 0', marginBottom:8}}>
-          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Period</span>
+        <div style={{display:'grid', gridTemplateColumns:'44px 1fr 140px 140px', gap:'10px', padding:'6px 0 10px', borderBottom:'1px solid var(--border)'}}>
+          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>#</span>
           <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Label</span>
-          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Start</span>
-          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>End</span>
+          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Start Time</span>
+          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>End Time</span>
         </div>
+        {(periods || []).length === 0 && (
+          <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>
+            Set the number of periods above to configure your schedule
+          </div>
+        )}
         {(periods || []).map((p, i) => (
-          <div key={p.id} style={{display:'grid', gridTemplateColumns:'80px 1fr 110px 110px', gap:'8px', alignItems:'center', padding:'6px 0', borderTop:'1px solid var(--border)'}}>
-            <span className="tag tag-gray" style={{width:'fit-content'}}>{i+1}</span>
-            <input value={p.label} onChange={e => updatePeriod(i, 'label', e.target.value)} />
-            <input type="time" value={p.startTime} onChange={e => updatePeriod(i, 'startTime', e.target.value)} />
-            <input type="time" value={p.endTime} onChange={e => updatePeriod(i, 'endTime', e.target.value)} />
+          <div key={p.id} style={{display:'grid', gridTemplateColumns:'44px 1fr 140px 140px', gap:'10px', alignItems:'center', padding:'8px 0', borderBottom:'1px solid var(--border)'}}>
+            <span className="tag tag-gray" style={{width:28,textAlign:'center',display:'inline-block'}}>{i+1}</span>
+            <input value={p.label} onChange={e => updatePeriod(i, 'label', e.target.value)} placeholder={`Period ${i+1}`} />
+            <input type="text" value={p.startTime} onChange={e => updatePeriod(i, 'startTime', e.target.value)} placeholder="e.g. 8:30 AM" />
+            <input type="text" value={p.endTime} onChange={e => updatePeriod(i, 'endTime', e.target.value)} placeholder="e.g. 9:38 AM" />
           </div>
         ))}
       </div>
