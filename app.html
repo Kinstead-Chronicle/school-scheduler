@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>School Scheduler</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f0f11;
+    --surface: #17171a;
+    --surface2: #1e1e23;
+    --surface3: #26262d;
+    --border: #2e2e38;
+    --accent: #7ef0a2;
+    --accent2: #4fc8ff;
+    --accent3: #ffb547;
+    --danger: #ff6b6b;
+    --text: #f0f0f0;
+    --text2: #9999aa;
+    --text3: #666677;
+    --mono: 'DM Mono', monospace;
+    --serif: 'Fraunces', serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; min-height: 100vh; }
+  
+  /* UPDATE BANNER */
+  .update-banner {
+    background: var(--accent3);
+    color: #1a1a00;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-weight: 500;
+    font-size: 12px;
+  }
+  .update-banner button {
+    background: #1a1a00;
+    color: var(--accent3);
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  /* LAYOUT */
+  .shell { display: flex; height: 100vh; overflow: hidden; }
+  .sidebar {
+    width: 220px;
+    min-width: 220px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .main { flex: 1; overflow-y: auto; padding: 32px; }
+
+  /* SIDEBAR */
+  .logo {
+    padding: 24px 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-title {
+    font-family: var(--serif);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .logo-sub {
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 3px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .nav { padding: 12px 0; flex: 1; }
+  .nav-section {
+    padding: 8px 20px 4px;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 20px;
+    cursor: pointer;
+    color: var(--text2);
+    font-size: 12px;
+    transition: all 0.15s;
+    border-left: 2px solid transparent;
+  }
+  .nav-item:hover { color: var(--text); background: var(--surface2); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--surface2); }
+  .nav-item .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text3); flex-shrink: 0;
+  }
+  .nav-item.active .dot { background: var(--accent); }
+  .nav-badge {
+    margin-left: auto;
+    background: var(--danger);
+    color: white;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+  }
+  .sidebar-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text3);
+  }
+  .version-tag { font-size: 10px; color: var(--text3); }
+
+  /* PAGE HEADER */
+  .page-header { margin-bottom: 28px; }
+  .page-title {
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 300;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .page-sub { color: var(--text2); font-size: 12px; }
+
+  /* CARDS */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 14px;
+  }
+
+  /* GRID */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  /* FORM ELEMENTS */
+  label { font-size: 11px; color: var(--text2); display: block; margin-bottom: 5px; }
+  input, select, textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--text3); }
+  select option { background: var(--surface2); }
+
+  /* BUTTONS */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: #0a1a10; }
+  .btn-primary:hover { background: #9af5b8; }
+  .btn-secondary { background: var(--surface3); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--surface2); border-color: var(--text3); }
+  .btn-danger { background: var(--danger); color: white; }
+  .btn-danger:hover { background: #ff8888; }
+  .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text3); }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* TABLE */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text3);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text2);
+  }
+  tr:hover td { background: var(--surface2); color: var(--text); }
+  tr:last-child td { border-bottom: none; }
+
+  /* TAGS */
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    margin: 1px;
+  }
+  .tag-green { background: rgba(126,240,162,0.15); color: var(--accent); border: 1px solid rgba(126,240,162,0.25); }
+  .tag-blue { background: rgba(79,200,255,0.15); color: var(--accent2); border: 1px solid rgba(79,200,255,0.25); }
+  .tag-yellow { background: rgba(255,181,71,0.15); color: var(--accent3); border: 1px solid rgba(255,181,71,0.25); }
+  .tag-red { background: rgba(255,107,107,0.15); color: var(--danger); border: 1px solid rgba(255,107,107,0.25); }
+  .tag-gray { background: var(--surface3); color: var(--text2); border: 1px solid var(--border); }
+
+  /* STAT CARDS */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .stat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .stat-value { font-family: var(--serif); font-size: 28px; font-weight: 300; color: var(--text); }
+  .stat-sub { font-size: 10px; color: var(--text3); margin-top: 2px; }
+
+  /* UPLOAD ZONE */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .upload-zone:hover { border-color: var(--accent); background: rgba(126,240,162,0.03); }
+  .upload-zone.dragover { border-color: var(--accent); background: rgba(126,240,162,0.06); }
+  .upload-icon { font-size: 32px; margin-bottom: 10px; }
+  .upload-label { color: var(--text2); font-size: 13px; margin-bottom: 4px; }
+  .upload-sub { color: var(--text3); font-size: 11px; }
+
+  /* PROGRESS */
+  .progress-bar {
+    height: 4px;
+    background: var(--surface3);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  /* ALERTS */
+  .alert {
+    padding: 12px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .alert-warn { background: rgba(255,181,71,0.1); border: 1px solid rgba(255,181,71,0.25); color: var(--accent3); }
+  .alert-error { background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.25); color: var(--danger); }
+  .alert-success { background: rgba(126,240,162,0.1); border: 1px solid rgba(126,240,162,0.25); color: var(--accent); }
+  .alert-info { background: rgba(79,200,255,0.1); border: 1px solid rgba(79,200,255,0.25); color: var(--accent2); }
+
+  /* EMPTY STATE */
+  .empty { text-align: center; padding: 60px 20px; color: var(--text3); }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-title { font-family: var(--serif); font-size: 18px; color: var(--text2); margin-bottom: 6px; }
+  .empty-sub { font-size: 12px; }
+
+  /* DIVIDER */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+  /* FLEX UTILS */
+  .flex { display: flex; }
+  .flex-between { display: flex; align-items: center; justify-content: space-between; }
+  .flex-gap { display: flex; align-items: center; gap: 10px; }
+  .flex-col { display: flex; flex-direction: column; gap: 12px; }
+  .mt-8 { margin-top: 8px; }
+  .mt-16 { margin-top: 16px; }
+  .mb-8 { margin-bottom: 8px; }
+  .mb-16 { margin-bottom: 16px; }
+
+  /* PERIOD ROW */
+  .period-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 100px 100px 120px auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .period-row:last-child { border-bottom: none; }
+
+  /* CLASS ROW */
+  .class-row {
+    display: grid;
+    grid-template-columns: 1fr 120px 80px 120px auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .class-row:last-child { border-bottom: none; }
+
+  /* CONFLICT CARD */
+  .conflict-card {
+    background: var(--surface);
+    border: 1px solid rgba(255,107,107,0.3);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 10px;
+  }
+  .conflict-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .conflict-name { font-weight: 500; color: var(--text); }
+  .conflict-reason { font-size: 11px; color: var(--danger); margin-bottom: 8px; }
+
+  /* RUN HISTORY */
+  .run-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .run-item:last-child { border-bottom: none; }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    width: 480px;
+    max-width: 90vw;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .modal-title { font-family: var(--serif); font-size: 20px; margin-bottom: 16px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const APP_VERSION = "1.0.0";
+const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
+const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
+const STORAGE_KEY = "school_scheduler_v1";
+
+// ─── STORAGE ────────────────────────────────────────────────────────────────
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function saveState(state) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+}
+
+const DEFAULT_STATE = {
+  schoolName: "",
+  numPeriods: 6,
+  periods: [],
+  classes: [],
+  electives: [],
+  students: [],
+  runs: [],
+};
+
+// ─── SCHEDULING ENGINE ───────────────────────────────────────────────────────
+function runScheduler(state) {
+  const { periods, classes, electives, students } = state;
+  if (!students.length || !periods.length) return { assignments: [], conflicts: [] };
+
+  // Build period availability map per elective
+  const electiveMap = {};
+  electives.forEach(e => { electiveMap[e.id] = e; });
+
+  // Build class cap map
+  const classCaps = {};
+  classes.forEach(c => { classCaps[c.id] = parseInt(c.maxSize) || 25; });
+  electives.forEach(e => { classCaps[e.id] = parseInt(e.maxSize) || 25; });
+
+  // Track enrollment counts per class per period
+  const enrollment = {}; // key: `${classId}_${periodId}`
+  const enrollKey = (cid, pid) => `${cid}_${pid}`;
+
+  const getEnroll = (cid, pid) => enrollment[enrollKey(cid, pid)] || 0;
+  const addEnroll = (cid, pid) => { enrollment[enrollKey(cid, pid)] = getEnroll(cid, pid) + 1; };
+
+  const assignments = [];
+  const conflicts = [];
+
+  // Sort: designated students first
+  const DESIGNATION_PRIORITY = ["ESE", "ELA Intervention", "Math Intervention", "Accelerated"];
+  const getPriority = (student) => {
+    const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
+    if (!desigs.length) return 999;
+    const min = Math.min(...desigs.map(d => {
+      const idx = DESIGNATION_PRIORITY.indexOf(d);
+      return idx === -1 ? 998 : idx;
+    }));
+    return min;
+  };
+
+  const sorted = [...students].sort((a, b) => getPriority(a) - getPriority(b));
+
+  sorted.forEach(student => {
+    const grade = parseInt(student.grade);
+    const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
+    const assignment = { student, schedule: {}, elective: null, conflicts: [] };
+
+    // Assign standard classes by grade
+    const gradeClasses = classes.filter(c =>
+      !c.gradeLevel || parseInt(c.gradeLevel) === grade ||
+      c.gradeLevel === "all"
+    );
+
+    // Track which periods are used
+    const usedPeriods = new Set();
+
+    // Handle PEAKS block (two consecutive periods)
+    const peaksClass = gradeClasses.find(c => c.isPeaks);
+    if (peaksClass) {
+      const peaksPeriods = peaksClass.periods ? peaksClass.periods.split(",").map(p => p.trim()) : [];
+      if (peaksPeriods.length >= 2) {
+        peaksPeriods.forEach(pid => {
+          assignment.schedule[pid] = peaksClass.name;
+          usedPeriods.add(pid);
+          addEnroll(peaksClass.id, pid);
+        });
+      }
+    }
+
+    // Assign other standard classes
+    gradeClasses.filter(c => !c.isPeaks).forEach(cls => {
+      const availPeriods = (cls.periods || "").split(",").map(p => p.trim()).filter(Boolean);
+      const open = availPeriods.find(pid => !usedPeriods.has(pid));
+      if (open) {
+        assignment.schedule[open] = cls.name;
+        usedPeriods.add(open);
+        addEnroll(cls.id, open);
+      }
+    });
+
+    // Assign intervention classes if designated
+    if (desigs.includes("ELA Intervention")) {
+      const intClass = electives.find(e => e.name === "ELA Intervention" || e.isElaIntervention);
+      if (intClass) {
+        const availPeriods = (intClass.availablePeriods || "").split(",").map(p => p.trim()).filter(Boolean);
+        const open = availPeriods.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
+        if (open) {
+          assignment.schedule[open] = intClass.name;
+          usedPeriods.add(open);
+          addEnroll(intClass.id, open);
+        }
+      }
+    }
+    if (desigs.includes("Math Intervention")) {
+      const intClass = electives.find(e => e.name === "Math Intervention" || e.isMathIntervention);
+      if (intClass) {
+        const availPeriods = (intClass.availablePeriods || "").split(",").map(p => p.trim()).filter(Boolean);
+        const open = availPeriods.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
+        if (open) {
+          assignment.schedule[open] = intClass.name;
+          usedPeriods.add(open);
+          addEnroll(intClass.id, open);
+        }
+      }
+    }
+
+    // Assign elective by ranked preference
+    const choices = [];
+    for (let i = 1; i <= 12; i++) {
+      const val = student[`choice_${i}`];
+      if (val && val.trim()) choices.push(val.trim());
+    }
+
+    let electiveAssigned = false;
+    for (const choice of choices) {
+      const elective = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
+      if (!elective) continue;
+      // Check grade restriction
+      if (elective.gradeRestriction && parseInt(elective.gradeRestriction) !== grade) continue;
+      const availPeriods = (elective.availablePeriods || "").split(",").map(p => p.trim()).filter(Boolean);
+      const open = availPeriods.find(pid =>
+        !usedPeriods.has(pid) &&
+        getEnroll(elective.id, pid) < (parseInt(elective.maxSize) || 25)
+      );
+      if (open) {
+        assignment.schedule[open] = `[E] ${elective.name}`;
+        assignment.elective = elective.name;
+        usedPeriods.add(open);
+        addEnroll(elective.id, open);
+        electiveAssigned = true;
+        break;
+      }
+    }
+
+    if (!electiveAssigned && choices.length > 0) {
+      assignment.conflicts.push(`All ${choices.length} elective choices unavailable or full`);
+      conflicts.push({ student, reason: `All elective choices exhausted`, choices });
+    } else if (!electiveAssigned && choices.length === 0) {
+      assignment.conflicts.push("No elective choices provided");
+    }
+
+    assignments.push(assignment);
+  });
+
+  return { assignments, conflicts };
+}
+
+// ─── EXPORT ──────────────────────────────────────────────────────────────────
+function exportToExcel(result, state, runName) {
+  const { assignments } = result;
+  const { periods } = state;
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Master Schedule
+  const masterData = periods.map(p => {
+    const participants = assignments
+      .filter(a => a.schedule[p.id])
+      .map(a => a.student.student_name)
+      .join(", ");
+    return {
+      Period: p.label,
+      "Class Name": [...new Set(assignments.filter(a => a.schedule[p.id]).map(a => a.schedule[p.id].replace("[E] ","")))].join(" / ") || "",
+      "Start Time": p.startTime,
+      "End Time": p.endTime,
+      Participants: participants,
+      Count: assignments.filter(a => a.schedule[p.id]).length
+    };
+  });
+  const ws1 = XLSX.utils.json_to_sheet(masterData);
+  XLSX.utils.book_append_sheet(wb, ws1, "Master Schedule");
+
+  // Sheet 2: Per-Student
+  const headers = ["Student Name", "Student ID", "Grade", "Designation", ...periods.map(p => p.label), "Elective Assigned"];
+  const rows = assignments.map(a => {
+    const row = {
+      "Student Name": a.student.student_name,
+      "Student ID": a.student.student_id,
+      "Grade": a.student.grade,
+      "Designation": a.student.designation || "",
+    };
+    periods.forEach(p => { row[p.label] = (a.schedule[p.id] || "—").replace("[E] ",""); });
+    row["Elective Assigned"] = a.elective || "⚠ UNASSIGNED";
+    return row;
+  });
+  const ws2 = XLSX.utils.json_to_sheet(rows, { header: headers });
+  XLSX.utils.book_append_sheet(wb, ws2, "Per-Student Schedule");
+
+  // Sheet 3: Conflicts
+  if (result.conflicts.length > 0) {
+    const conflictData = result.conflicts.map(c => ({
+      "Student Name": c.student.student_name,
+      "Student ID": c.student.student_id,
+      "Grade": c.student.grade,
+      "Issue": c.reason,
+      "Choices Submitted": c.choices ? c.choices.join(", ") : ""
+    }));
+    const ws3 = XLSX.utils.json_to_sheet(conflictData);
+    XLSX.utils.book_append_sheet(wb, ws3, "Conflicts");
+  }
+
+  XLSX.writeFile(wb, `${runName}.xlsx`);
+}
+
+// ─── COMPONENTS ──────────────────────────────────────────────────────────────
+
+function UpdateBanner({ onDismiss }) {
+  return (
+    <div className="update-banner">
+      <span>⚡ A new version is available</span>
+      <button onClick={() => window.location.href = APP_URL + "?v=" + Date.now()}>Update Now</button>
+      <button onClick={onDismiss} style={{background:'transparent',color:'#1a1a00',border:'none',cursor:'pointer',fontSize:14}}>✕</button>
+    </div>
+  );
+}
+
+// ─── SETUP PAGE ──────────────────────────────────────────────────────────────
+function SetupPage({ state, setState }) {
+  const { schoolName, numPeriods, periods } = state;
+
+  const updateField = (field, val) => setState(s => ({ ...s, [field]: val }));
+
+  const syncPeriods = (n) => {
+    const count = parseInt(n) || 1;
+    const current = periods || [];
+    const updated = [];
+    for (let i = 0; i < count; i++) {
+      updated.push(current[i] || { id: `p${i+1}`, label: `${i+1}${getOrdinal(i+1)} Period`, startTime: "", endTime: "" });
+    }
+    setState(s => ({ ...s, numPeriods: count, periods: updated }));
+  };
+
+  const getOrdinal = (n) => {
+    const s = ["th","st","nd","rd"], v = n % 100;
+    return (s[(v-20)%10] || s[v] || s[0]);
+  };
+
+  const updatePeriod = (idx, field, val) => {
+    const updated = [...periods];
+    updated[idx] = { ...updated[idx], [field]: val };
+    setState(s => ({ ...s, periods: updated }));
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="page-title">School Setup</div>
+        <div className="page-sub">Configure your school's basic information and periods</div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">School Info</div>
+        <div className="grid-2">
+          <div>
+            <label>School Name</label>
+            <input value={schoolName} onChange={e => updateField("schoolName", e.target.value)} placeholder="e.g. Galileo Gifted School for Learning" />
+          </div>
+          <div>
+            <label>Number of Periods</label>
+            <input type="number" min="1" max="12" value={numPeriods} onChange={e => syncPeriods(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Period Schedule</div>
+        <div style={{display:'grid', gridTemplateColumns:'80px 1fr 110px 110px', gap:'8px', padding:'8px 0', marginBottom:8}}>
+          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Period</span>
+          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Label</span>
+          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Start</span>
+          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>End</span>
+        </div>
+        {(periods || []).map((p, i) => (
+          <div key={p.id} style={{display:'grid', gridTemplateColumns:'80px 1fr 110px 110px', gap:'8px', alignItems:'center', padding:'6px 0', borderTop:'1px solid var(--border)'}}>
+            <span className="tag tag-gray" style={{width:'fit-content'}}>{i+1}</span>
+            <input value={p.label} onChange={e => updatePeriod(i, 'label', e.target.value)} />
+            <input type="time" value={p.startTime} onChange={e => updatePeriod(i, 'startTime', e.target.value)} />
+            <input type="time" value={p.endTime} onChange={e => updatePeriod(i, 'endTime', e.target.value)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── CLASSES PAGE ─────────────────────────────────────────────────────────────
+function ClassesPage({ state, setState }) {
+  const { classes = [], electives = [], periods = [] } = state;
+  const [tab, setTab] = useState("standard");
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({});
+
+  const periodOptions = periods.map(p => ({ id: p.id, label: p.label }));
+
+  const openAdd = () => {
+    setEditing(null);
+    setForm(tab === "standard"
+      ? { name: "", gradeLevel: "all", isPeaks: false, periods: [] }
+      : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }
+    );
+    setShowModal(true);
+  };
+
+  const openEdit = (item) => {
+    setEditing(item.id);
+    if (tab === "standard") {
+      setForm({ ...item, periods: (item.periods || "").split(",").map(p=>p.trim()).filter(Boolean) });
+    } else {
+      setForm({ ...item, availablePeriods: (item.availablePeriods || "").split(",").map(p=>p.trim()).filter(Boolean) });
+    }
+    setShowModal(true);
+  };
+
+  const save = () => {
+    if (tab === "standard") {
+      const item = { ...form, id: editing || `cls_${Date.now()}`, periods: (form.periods || []).join(",") };
+      setState(s => ({
+        ...s,
+        classes: editing ? s.classes.map(c => c.id === editing ? item : c) : [...s.classes, item]
+      }));
+    } else {
+      const item = { ...form, id: editing || `elec_${Date.now()}`, availablePeriods: (form.availablePeriods || []).join(",") };
+      setState(s => ({
+        ...s,
+        electives: editing ? s.electives.map(e => e.id === editing ? item : e) : [...s.electives, item]
+      }));
+    }
+    setShowModal(false);
+  };
+
+  const remove = (id) => {
+    if (tab === "standard") setState(s => ({ ...s, classes: s.classes.filter(c => c.id !== id) }));
+    else setState(s => ({ ...s, electives: s.electives.filter(e => e.id !== id) }));
+  };
+
+  const togglePeriod = (pid) => {
+    const key = tab === "standard" ? "periods" : "availablePeriods";
+    const current = form[key] || [];
+    setForm(f => ({ ...f, [key]: current.includes(pid) ? current.filter(p => p !== pid) : [...current, pid] }));
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="flex-between">
+          <div>
+            <div className="page-title">Classes</div>
+            <div className="page-sub">Configure standard classes and electives</div>
+          </div>
+          <button className="btn btn-primary" onClick={openAdd}>+ Add {tab === "standard" ? "Class" : "Elective"}</button>
+        </div>
+      </div>
+
+      <div className="flex-gap mb-16">
+        <button className={`btn ${tab==="standard"?"btn-primary":"btn-ghost"}`} onClick={() => setTab("standard")}>Standard Classes ({classes.length})</button>
+        <button className={`btn ${tab==="elective"?"btn-primary":"btn-ghost"}`} onClick={() => setTab("elective")}>Electives ({electives.length})</button>
+      </div>
+
+      {tab === "standard" && (
+        <div className="card">
+          {classes.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon">📚</div>
+              <div className="empty-title">No standard classes yet</div>
+              <div className="empty-sub">Add core classes that are automatically assigned to students</div>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr>
+                  <th>Class Name</th><th>Grade Level</th><th>Type</th><th>Periods</th><th>Max Size</th><th></th>
+                </tr></thead>
+                <tbody>
+                  {classes.map(c => (
+                    <tr key={c.id}>
+                      <td style={{color:'var(--text)'}}>{c.name}</td>
+                      <td>{c.gradeLevel === "all" ? <span className="tag tag-gray">All</span> : <span className="tag tag-blue">{c.gradeLevel}th Grade</span>}</td>
+                      <td>{c.isPeaks ? <span className="tag tag-yellow">PEAKS Block</span> : <span className="tag tag-gray">Standard</span>}</td>
+                      <td style={{fontSize:11}}>{(c.periods||"").split(",").filter(Boolean).map(pid => {
+                        const p = periods.find(x => x.id === pid);
+                        return p ? <span key={pid} className="tag tag-gray" style={{marginRight:2}}>{p.label}</span> : null;
+                      })}</td>
+                      <td>{c.maxSize || "25"}</td>
+                      <td>
+                        <div className="flex-gap">
+                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(c)}>Edit</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => remove(c.id)}>Remove</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "elective" && (
+        <div className="card">
+          {electives.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon">🎨</div>
+              <div className="empty-title">No electives yet</div>
+              <div className="empty-sub">Add elective courses students will rank by preference</div>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr>
+                  <th>Elective Name</th><th>Type</th><th>Max Size</th><th>Grade Restriction</th><th>Available Periods</th><th></th>
+                </tr></thead>
+                <tbody>
+                  {electives.map(e => (
+                    <tr key={e.id}>
+                      <td style={{color:'var(--text)'}}>{e.name}</td>
+                      <td>
+                        {e.isElaIntervention || e.isMathIntervention
+                          ? <span className="tag tag-red">Intervention</span>
+                          : e.isYearLong ? <span className="tag tag-green">Year-Long</span> : <span className="tag tag-blue">Semester</span>}
+                      </td>
+                      <td>{e.maxSize || "25"}</td>
+                      <td>{e.gradeRestriction ? <span className="tag tag-yellow">{e.gradeRestriction}th Only</span> : <span className="tag tag-gray">All</span>}</td>
+                      <td style={{fontSize:11}}>{(e.availablePeriods||"").split(",").filter(Boolean).map(pid => {
+                        const p = periods.find(x => x.id === pid);
+                        return p ? <span key={pid} className="tag tag-gray" style={{marginRight:2}}>{p.label}</span> : null;
+                      })}</td>
+                      <td>
+                        <div className="flex-gap">
+                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(e)}>Edit</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => remove(e.id)}>Remove</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showModal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
+          <div className="modal">
+            <div className="modal-title">{editing ? "Edit" : "Add"} {tab === "standard" ? "Standard Class" : "Elective"}</div>
+
+            <div className="flex-col">
+              <div>
+                <label>Name</label>
+                <input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder={tab === "standard" ? "e.g. 6th Grade Math" : "e.g. Photography"} />
+              </div>
+
+              {tab === "standard" && (
+                <>
+                  <div>
+                    <label>Grade Level</label>
+                    <select value={form.gradeLevel || "all"} onChange={e => setForm(f => ({ ...f, gradeLevel: e.target.value }))}>
+                      <option value="all">All Grades</option>
+                      <option value="6">6th Grade</option>
+                      <option value="7">7th Grade</option>
+                      <option value="8">8th Grade</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{marginBottom:8}}>PEAKS Block (2 consecutive periods)</label>
+                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
+                      <input type="checkbox" checked={form.isPeaks||false} onChange={e => setForm(f=>({...f,isPeaks:e.target.checked}))} style={{width:'auto'}} />
+                      <span style={{fontSize:12}}>This is a PEAKS block</span>
+                    </label>
+                  </div>
+                </>
+              )}
+
+              {tab === "elective" && (
+                <>
+                  <div className="grid-2">
+                    <div>
+                      <label>Max Class Size</label>
+                      <input type="number" value={form.maxSize || "25"} onChange={e => setForm(f => ({ ...f, maxSize: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label>Grade Restriction (optional)</label>
+                      <select value={form.gradeRestriction || ""} onChange={e => setForm(f => ({ ...f, gradeRestriction: e.target.value }))}>
+                        <option value="">All Grades</option>
+                        <option value="6">6th Grade Only</option>
+                        <option value="7">7th Grade Only</option>
+                        <option value="8">8th Grade Only</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex-gap">
+                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
+                      <input type="checkbox" checked={form.isYearLong||false} onChange={e => setForm(f=>({...f,isYearLong:e.target.checked}))} style={{width:'auto'}} />
+                      <span style={{fontSize:12}}>Year-long</span>
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
+                      <input type="checkbox" checked={form.isElaIntervention||false} onChange={e => setForm(f=>({...f,isElaIntervention:e.target.checked}))} style={{width:'auto'}} />
+                      <span style={{fontSize:12}}>ELA Intervention</span>
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
+                      <input type="checkbox" checked={form.isMathIntervention||false} onChange={e => setForm(f=>({...f,isMathIntervention:e.target.checked}))} style={{width:'auto'}} />
+                      <span style={{fontSize:12}}>Math Intervention</span>
+                    </label>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label style={{marginBottom:8}}>Available Periods</label>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {periodOptions.map(p => {
+                    const key = tab === "standard" ? "periods" : "availablePeriods";
+                    const selected = (form[key] || []).includes(p.id);
+                    return (
+                      <button key={p.id} className={`btn btn-sm ${selected ? "btn-primary" : "btn-ghost"}`} onClick={() => togglePeriod(p.id)}>
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={save} disabled={!form.name}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── STUDENTS PAGE ────────────────────────────────────────────────────────────
+function StudentsPage({ state, setState }) {
+  const { students = [] } = state;
+  const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef();
+
+  const processCSV = (file) => {
+    setError("");
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const required = ["student_name", "student_id", "grade"];
+        const headers = results.meta.fields || [];
+        const missing = required.filter(r => !headers.includes(r));
+        if (missing.length > 0) {
+          setError(`Missing required columns: ${missing.join(", ")}`);
+          return;
+        }
+        setState(s => ({ ...s, students: results.data }));
+      },
+      error: (err) => setError(err.message)
+    });
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processCSV(file);
+  };
+
+  const designationCounts = {};
+  students.forEach(s => {
+    (s.designation || "").split("|").forEach(d => {
+      d = d.trim();
+      if (d) designationCounts[d] = (designationCounts[d] || 0) + 1;
+    });
+  });
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="flex-between">
+          <div>
+            <div className="page-title">Students</div>
+            <div className="page-sub">Upload student preference data via CSV</div>
+          </div>
+          {students.length > 0 && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setState(s => ({ ...s, students: [] }))}>Clear Students</button>
+          )}
+        </div>
+      </div>
+
+      {students.length === 0 ? (
+        <>
+          {error && <div className="alert alert-error">⚠ {error}</div>}
+          <div
+            className={`upload-zone ${dragOver ? "dragover" : ""}`}
+            onDrop={handleDrop}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onClick={() => fileRef.current.click()}
+          >
+            <div className="upload-icon">📂</div>
+            <div className="upload-label">Drop your student CSV here or click to browse</div>
+            <div className="upload-sub">Required columns: student_name, student_id, grade — Optional: designation, choice_1 through choice_12</div>
+          </div>
+          <input ref={fileRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => e.target.files[0] && processCSV(e.target.files[0])} />
+
+          <div className="card" style={{marginTop:16}}>
+            <div className="card-title">Expected CSV Format</div>
+            <div style={{overflow:'auto',background:'var(--surface2)',padding:'12px',borderRadius:6,fontSize:11,color:'var(--accent)',fontFamily:'var(--mono)'}}>
+              student_name,student_id,grade,designation,choice_1,choice_2,...,choice_12<br/>
+              Jane Smith,10001,6,,Photography,PE,Art,...<br/>
+              John Doe,10002,7,ELA Intervention,PE,TV Production,...<br/>
+              Mary Lee,10003,8,Accelerated|ESE,Band 1,Yearbook,...
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="stat-grid">
+            <div className="stat-card">
+              <div className="stat-label">Total Students</div>
+              <div className="stat-value">{students.length}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">6th Grade</div>
+              <div className="stat-value">{students.filter(s => s.grade == 6).length}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">7th Grade</div>
+              <div className="stat-value">{students.filter(s => s.grade == 7).length}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">8th Grade</div>
+              <div className="stat-value">{students.filter(s => s.grade == 8).length}</div>
+            </div>
+          </div>
+
+          {Object.keys(designationCounts).length > 0 && (
+            <div className="card">
+              <div className="card-title">Student Designations</div>
+              <div className="flex-gap" style={{flexWrap:'wrap'}}>
+                {Object.entries(designationCounts).map(([d, count]) => (
+                  <span key={d} className="tag tag-yellow">{d}: {count}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="card">
+            <div className="card-title">Student List</div>
+            <div className="table-wrap" style={{maxHeight:400,overflowY:'auto'}}>
+              <table>
+                <thead><tr>
+                  <th>Name</th><th>ID</th><th>Grade</th><th>Designation</th><th>Top Choices</th>
+                </tr></thead>
+                <tbody>
+                  {students.slice(0, 100).map((s, i) => (
+                    <tr key={i}>
+                      <td style={{color:'var(--text)'}}>{s.student_name}</td>
+                      <td>{s.student_id}</td>
+                      <td><span className="tag tag-blue">{s.grade}th</span></td>
+                      <td>
+                        {(s.designation||"").split("|").filter(Boolean).map(d => (
+                          <span key={d} className="tag tag-yellow" style={{marginRight:2}}>{d}</span>
+                        ))}
+                      </td>
+                      <td style={{fontSize:11,color:'var(--text3)'}}>
+                        {[s.choice_1,s.choice_2,s.choice_3].filter(Boolean).join(" → ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {students.length > 100 && <div style={{textAlign:'center',padding:12,color:'var(--text3)',fontSize:11}}>Showing 100 of {students.length} students</div>}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── SCHEDULE PAGE ────────────────────────────────────────────────────────────
+function SchedulePage({ state, setState }) {
+  const { students = [], periods = [], classes = [], electives = [], runs = [] } = state;
+  const [running, setRunning] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const [runName, setRunName] = useState(() => `Schedule_Run_${new Date().toLocaleDateString("en-US").replace(/\//g,"_")}`);
+
+  const canRun = students.length > 0 && periods.length > 0;
+
+  const run = () => {
+    setRunning(true);
+    setTimeout(() => {
+      const result = runScheduler(state);
+      const run = {
+        id: `run_${Date.now()}`,
+        name: runName,
+        date: new Date().toLocaleString(),
+        totalStudents: students.length,
+        conflicts: result.conflicts.length,
+        assigned: students.length - result.conflicts.length,
+        result
+      };
+      setState(s => ({ ...s, runs: [run, ...s.runs] }));
+      setLastResult(run);
+      setRunning(false);
+      setRunName(`Schedule_Run_${new Date().toLocaleDateString("en-US").replace(/\//g,"_")}_v${(runs.length+2)}`);
+    }, 800);
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="page-title">Run Schedule</div>
+        <div className="page-sub">Generate and export student schedules</div>
+      </div>
+
+      {!canRun && (
+        <div className="alert alert-warn">
+          ⚠ Complete setup first — you need at least one period configured and students uploaded before running.
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-title">New Run</div>
+        <div style={{display:'flex',gap:10,alignItems:'flex-end'}}>
+          <div style={{flex:1}}>
+            <label>Run Name (used as export filename)</label>
+            <input value={runName} onChange={e => setRunName(e.target.value)} placeholder="Schedule_Run_1" />
+          </div>
+          <button className="btn btn-primary" onClick={run} disabled={!canRun || running}>
+            {running ? "⏳ Running..." : "▶ Run Scheduler"}
+          </button>
+        </div>
+
+        {running && (
+          <div style={{marginTop:16}}>
+            <div style={{fontSize:12,color:'var(--text2)',marginBottom:6}}>Processing {students.length} students...</div>
+            <div className="progress-bar"><div className="progress-fill" style={{width:'100%',animation:'none',background:'var(--accent)'}} /></div>
+          </div>
+        )}
+      </div>
+
+      {lastResult && (
+        <div className="card" style={{borderColor:'rgba(126,240,162,0.3)'}}>
+          <div className="card-title">Latest Run — {lastResult.name}</div>
+          <div className="stat-grid">
+            <div className="stat-card">
+              <div className="stat-label">Total Students</div>
+              <div className="stat-value">{lastResult.totalStudents}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Fully Assigned</div>
+              <div className="stat-value" style={{color:'var(--accent)'}}>{lastResult.assigned}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Conflicts</div>
+              <div className="stat-value" style={{color: lastResult.conflicts > 0 ? 'var(--danger)' : 'var(--accent)'}}>{lastResult.conflicts}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Assignment Rate</div>
+              <div className="stat-value">{Math.round((lastResult.assigned/lastResult.totalStudents)*100)}%</div>
+            </div>
+          </div>
+          <button className="btn btn-primary" onClick={() => exportToExcel(lastResult.result, state, lastResult.name)}>
+            ↓ Export to Excel
+          </button>
+        </div>
+      )}
+
+      {runs.length > 0 && (
+        <div className="card">
+          <div className="card-title">Run History</div>
+          {runs.map(r => (
+            <div key={r.id} className="run-item">
+              <div>
+                <div style={{color:'var(--text)',fontSize:13,marginBottom:3}}>{r.name}</div>
+                <div style={{fontSize:11,color:'var(--text3)'}}>{r.date} · {r.totalStudents} students</div>
+              </div>
+              <div className="flex-gap">
+                {r.conflicts > 0
+                  ? <span className="tag tag-red">{r.conflicts} conflicts</span>
+                  : <span className="tag tag-green">Clean</span>}
+                <span style={{fontSize:12,color:'var(--text2)'}}>{Math.round((r.assigned/r.totalStudents)*100)}% assigned</span>
+                <button className="btn btn-ghost btn-sm" onClick={() => exportToExcel(r.result, state, r.name)}>↓ Export</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CONFLICTS PAGE ───────────────────────────────────────────────────────────
+function ConflictsPage({ state, setState }) {
+  const { runs = [], electives = [], periods = [] } = state;
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [overrides, setOverrides] = useState({});
+
+  const activeRun = selectedRun ? runs.find(r => r.id === selectedRun) : runs[0];
+  const conflicts = activeRun?.result?.conflicts || [];
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="flex-between">
+          <div>
+            <div className="page-title">Conflicts</div>
+            <div className="page-sub">Review and manually resolve scheduling conflicts</div>
+          </div>
+          {runs.length > 1 && (
+            <select style={{width:'auto'}} value={selectedRun || runs[0]?.id} onChange={e => setSelectedRun(e.target.value)}>
+              {runs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {!activeRun && (
+        <div className="empty">
+          <div className="empty-icon">✅</div>
+          <div className="empty-title">No runs yet</div>
+          <div className="empty-sub">Run the scheduler first to see conflicts here</div>
+        </div>
+      )}
+
+      {activeRun && conflicts.length === 0 && (
+        <div className="alert alert-success">✓ No conflicts in this run — all students were successfully assigned.</div>
+      )}
+
+      {conflicts.map((c, i) => (
+        <div key={i} className="conflict-card">
+          <div className="conflict-header">
+            <div>
+              <div className="conflict-name">{c.student.student_name}</div>
+              <div style={{fontSize:11,color:'var(--text3)'}}>{c.student.student_id} · Grade {c.student.grade} {c.student.designation ? `· ${c.student.designation}` : ""}</div>
+            </div>
+            <span className="tag tag-red">Unassigned</span>
+          </div>
+          <div className="conflict-reason">⚠ {c.reason}</div>
+          <div style={{marginBottom:8}}>
+            <span style={{fontSize:11,color:'var(--text3)'}}>Submitted choices: </span>
+            {(c.choices||[]).map(ch => <span key={ch} className="tag tag-gray" style={{marginRight:2}}>{ch}</span>)}
+          </div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <select
+              style={{width:'auto',flex:1}}
+              value={overrides[c.student.student_id] || ""}
+              onChange={e => setOverrides(o => ({ ...o, [c.student.student_id]: e.target.value }))}
+            >
+              <option value="">— Manually assign elective —</option>
+              {electives.filter(e => !e.isElaIntervention && !e.isMathIntervention).map(e => (
+                <option key={e.id} value={e.name}>{e.name}</option>
+              ))}
+            </select>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={!overrides[c.student.student_id]}
+              onClick={() => {
+                // Apply override to latest run result
+                const override = overrides[c.student.student_id];
+                setState(s => {
+                  const runs = s.runs.map(r => {
+                    if (r.id !== (selectedRun || s.runs[0]?.id)) return r;
+                    const updated = {
+                      ...r,
+                      conflicts: r.result.conflicts - 1,
+                      assigned: r.result.assigned + 1,
+                      result: {
+                        ...r.result,
+                        assignments: r.result.assignments.map(a => {
+                          if (a.student.student_id !== c.student.student_id) return a;
+                          const openPeriod = periods.find(p => !a.schedule[p.id]);
+                          if (openPeriod) {
+                            return { ...a, elective: override, schedule: { ...a.schedule, [openPeriod.id]: `[E] ${override}` } };
+                          }
+                          return { ...a, elective: override };
+                        }),
+                        conflicts: r.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id)
+                      }
+                    };
+                    return updated;
+                  });
+                  return { ...s, runs };
+                });
+                setOverrides(o => { const n = {...o}; delete n[c.student.student_id]; return n; });
+              }}
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+function App() {
+  const [state, setStateRaw] = useState(() => loadState() || DEFAULT_STATE);
+  const [page, setPage] = useState("setup");
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  const setState = useCallback((updater) => {
+    setStateRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      saveState(next);
+      return next;
+    });
+  }, []);
+
+  // OTA version check
+  useEffect(() => {
+    fetch(VERSION_URL + "?v=" + Date.now())
+      .then(r => r.json())
+      .then(data => {
+        if (data.version && data.version !== APP_VERSION) setUpdateAvailable(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  const conflictCount = state.runs[0]?.result?.conflicts?.length || 0;
+
+  const navItems = [
+    { id: "setup", label: "School Setup", section: "Configure" },
+    { id: "classes", label: "Classes & Electives", section: null },
+    { id: "students", label: "Students", section: "Data" },
+    { id: "schedule", label: "Run Schedule", section: "Schedule" },
+    { id: "conflicts", label: "Conflicts", badge: conflictCount > 0 ? conflictCount : null, section: null },
+  ];
+
+  let sections = [];
+  navItems.forEach(item => {
+    if (item.section) sections.push(item.section);
+  });
+
+  return (
+    <div>
+      {updateAvailable && <UpdateBanner onDismiss={() => setUpdateAvailable(false)} />}
+      <div className="shell">
+        <div className="sidebar">
+          <div className="logo">
+            <div className="logo-title">{state.schoolName || "School Scheduler"}</div>
+            <div className="logo-sub">Schedule Manager</div>
+          </div>
+          <nav className="nav">
+            {(() => {
+              let lastSection = null;
+              return navItems.map(item => (
+                <React.Fragment key={item.id}>
+                  {item.section && item.section !== lastSection && (() => { lastSection = item.section; return <div className="nav-section">{item.section}</div>; })()}
+                  <div className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)}>
+                    <div className="dot" />
+                    {item.label}
+                    {item.badge && <span className="nav-badge">{item.badge}</span>}
+                  </div>
+                </React.Fragment>
+              ));
+            })()}
+          </nav>
+          <div className="sidebar-footer">
+            <div className="version-tag">v{APP_VERSION}</div>
+            <div style={{marginTop:2}}>© 2026 School Scheduler</div>
+          </div>
+        </div>
+        <div className="main">
+          {page === "setup" && <SetupPage state={state} setState={setState} />}
+          {page === "classes" && <ClassesPage state={state} setState={setState} />}
+          {page === "students" && <StudentsPage state={state} setState={setState} />}
+          {page === "schedule" && <SchedulePage state={state} setState={setState} />}
+          {page === "conflicts" && <ConflictsPage state={state} setState={setState} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
