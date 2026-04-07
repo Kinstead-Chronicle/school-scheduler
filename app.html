@@ -111,13 +111,13 @@ const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/versi
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
 
-const BLANK = { schoolName: "", lunchStart: "", lunchEnd: "", numPeriods: 6, periods: [], classes: [], electives: [], students: [], runs: [] };
+const BLANK = { schoolName: "", lunchStart: "", lunchEnd: "", numPeriods: 6, periods: [], classes: [], electives: [], peaksPairs: [], students: [], runs: [] };
 
 function load() { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
 function save(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {} }
 
 function runScheduler(state) {
-  const { periods, classes, electives, students } = state;
+  const { periods, classes, electives, students, peaksPairs = [] } = state;
   if (!students.length || !periods.length) return { assignments: [], conflicts: [] };
   const pids = periods.map(p => p.id);
   const classPMap = {};
@@ -145,6 +145,9 @@ function runScheduler(state) {
     if (desigs.includes("ELA Intervention") || desigs.includes("Math Intervention")) sc += 1000;
     if (desigs.includes("ESE")) sc += 300;
     if (desigs.includes("Accelerated")) sc += 200;
+    // PEAKS pair adds high constraint score
+    const gradePair = peaksPairs.find(pair => pair.gradeLevel === String(grade));
+    if (gradePair) sc += 600;
     classes.filter(c => c.gradeLevel === String(grade) || c.gradeLevel === "all" || !c.gradeLevel).forEach(c => {
       const ps = classPMap[c.id] || [];
       if (ps.length === 1) sc += 500;
@@ -164,26 +167,46 @@ function runScheduler(state) {
     const schedule = {};
     const used = new Set();
     const gradeClasses = classes.filter(c => c.gradeLevel === String(grade) || c.gradeLevel === "all" || !c.gradeLevel);
-    const peaks = gradeClasses.find(c => c.isPeaks);
-    if (peaks) {
-      const pp = (peaks.periods || "").split(",").map(x => x.trim()).filter(Boolean);
-      let placed = false;
-      for (let i = 0; i < pids.length - 1; i++) {
-        const p1 = pids[i], p2 = pids[i + 1];
-        if (!used.has(p1) && !used.has(p2) && (pp.length === 0 || (pp.includes(p1) && pp.includes(p2))) && getE(peaks.id, p1) < cap(peaks) && getE(peaks.id, p2) < cap(peaks)) {
-          schedule[p1] = peaks.name; schedule[p2] = peaks.name + " (cont.)";
-          used.add(p1); used.add(p2); addE(peaks.id, p1); addE(peaks.id, p2); placed = true; break;
-        }
-      }
-      if (!placed) {
+
+    // PEAKS pair: find two consecutive open periods, assign classA to one and classB to the other
+    const gradePair = peaksPairs.find(pair => pair.gradeLevel === String(grade));
+    if (gradePair) {
+      const classA = classes.find(c => c.id === gradePair.classAId);
+      const classB = classes.find(c => c.id === gradePair.classBId);
+      if (classA && classB) {
+        // Allowed periods: intersection of both classes' period hints (or all periods if no hints)
+        const aPs = (classA.periods || "").split(",").map(x => x.trim()).filter(Boolean);
+        const bPs = (classB.periods || "").split(",").map(x => x.trim()).filter(Boolean);
+        let placed = false;
         for (let i = 0; i < pids.length - 1; i++) {
-          if (!used.has(pids[i]) && !used.has(pids[i + 1])) {
-            schedule[pids[i]] = peaks.name; schedule[pids[i + 1]] = peaks.name + " (cont.)";
-            used.add(pids[i]); used.add(pids[i + 1]); addE(peaks.id, pids[i]); addE(peaks.id, pids[i + 1]); break;
+          const p1 = pids[i], p2 = pids[i + 1];
+          const p1okA = aPs.length === 0 || aPs.includes(p1);
+          const p1okB = bPs.length === 0 || bPs.includes(p1);
+          const p2okA = aPs.length === 0 || aPs.includes(p2);
+          const p2okB = bPs.length === 0 || bPs.includes(p2);
+          const capOk = getE(classA.id, p1) < cap(classA) && getE(classB.id, p2) < cap(classB);
+          const capOkRev = getE(classB.id, p1) < cap(classB) && getE(classA.id, p2) < cap(classA);
+          if (!used.has(p1) && !used.has(p2)) {
+            if ((p1okA && p2okB && capOk) || (aPs.length === 0 && bPs.length === 0 && capOk)) {
+              schedule[p1] = classA.name; schedule[p2] = classB.name;
+              used.add(p1); used.add(p2); addE(classA.id, p1); addE(classB.id, p2); placed = true; break;
+            } else if ((p1okB && p2okA && capOkRev) || (aPs.length === 0 && bPs.length === 0 && capOkRev)) {
+              schedule[p1] = classB.name; schedule[p2] = classA.name;
+              used.add(p1); used.add(p2); addE(classB.id, p1); addE(classA.id, p2); placed = true; break;
+            }
+          }
+        }
+        if (!placed) {
+          for (let i = 0; i < pids.length - 1; i++) {
+            if (!used.has(pids[i]) && !used.has(pids[i + 1])) {
+              schedule[pids[i]] = classA.name; schedule[pids[i + 1]] = classB.name;
+              used.add(pids[i]); used.add(pids[i + 1]); addE(classA.id, pids[i]); addE(classB.id, pids[i + 1]); placed = true; break;
+            }
           }
         }
       }
     }
+
     const assignIntervention = (flag, isEla) => {
       const intC = electives.find(e => isEla ? e.isElaIntervention : e.isMathIntervention);
       if (!intC) return;
@@ -196,14 +219,18 @@ function runScheduler(state) {
     };
     if (desigs.includes("ELA Intervention")) assignIntervention(true, true);
     if (desigs.includes("Math Intervention")) assignIntervention(false, false);
-    gradeClasses.filter(c => !c.isPeaks && singlePeriod.has(c.id)).sort((a, b) => (classPMap[a.id] || []).length - (classPMap[b.id] || []).length).forEach(cls => {
+
+    // Non-PEAKS, non-paired standard classes — skip classes that are part of a PEAKS pair
+    const pairedClassIds = new Set(peaksPairs.flatMap(pair => [pair.classAId, pair.classBId]));
+    gradeClasses.filter(c => !pairedClassIds.has(c.id) && singlePeriod.has(c.id)).sort((a, b) => (classPMap[a.id] || []).length - (classPMap[b.id] || []).length).forEach(cls => {
       const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
       if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); }
     });
-    gradeClasses.filter(c => !c.isPeaks && !singlePeriod.has(c.id)).sort((a, b) => (classPMap[a.id] || pids).length - (classPMap[b.id] || pids).length).forEach(cls => {
+    gradeClasses.filter(c => !pairedClassIds.has(c.id) && !singlePeriod.has(c.id)).sort((a, b) => (classPMap[a.id] || pids).length - (classPMap[b.id] || pids).length).forEach(cls => {
       const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
       if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); }
     });
+
     const choices = getChoices(student);
     let electiveAssigned = null;
     for (const choice of choices) {
@@ -219,6 +246,7 @@ function runScheduler(state) {
   });
   return { assignments, conflicts };
 }
+
 
 function exportToExcel(result, state, runName) {
   const { assignments } = result;
@@ -330,13 +358,13 @@ function SetupPage({ state, setState }) {
 }
 
 function ClassesPage({ state, setState }) {
-  const { classes = [], electives = [], periods = [] } = state;
+  const { classes = [], electives = [], peaksPairs = [], periods = [] } = state;
   const [tab, setTab] = useState("standard");
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
-  const pids = periods.map(p => p.id);
-  const openAdd = () => { setEditing(null); setForm(tab === "standard" ? { name: "", gradeLevel: "all", isPeaks: false, periods: [] } : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }); setShowModal(true); };
+  const [pairForm, setPairForm] = useState({ gradeLevel: "6", classAId: "", classBId: "" });
+  const openAdd = () => { setEditing(null); setForm(tab === "standard" ? { name: "", gradeLevel: "all", periods: [] } : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }); setShowModal(true); };
   const openEdit = item => {
     setEditing(item.id);
     if (tab === "standard") setForm({ ...item, periods: (item.periods || "").split(",").map(x => x.trim()).filter(Boolean) });
@@ -354,6 +382,13 @@ function ClassesPage({ state, setState }) {
     setShowModal(false);
   };
   const remove = id => { if (tab === "standard") setState(s => ({ ...s, classes: s.classes.filter(c => c.id !== id) })); else setState(s => ({ ...s, electives: s.electives.filter(e => e.id !== id) })); };
+  const removePair = grade => setState(s => ({ ...s, peaksPairs: s.peaksPairs.filter(p => p.gradeLevel !== grade) }));
+  const addPair = () => {
+    if (!pairForm.classAId || !pairForm.classBId || pairForm.classAId === pairForm.classBId) return;
+    const pair = { id: "pair_" + Date.now(), gradeLevel: pairForm.gradeLevel, classAId: pairForm.classAId, classBId: pairForm.classBId };
+    setState(s => ({ ...s, peaksPairs: [...s.peaksPairs.filter(p => p.gradeLevel !== pairForm.gradeLevel), pair] }));
+    setPairForm({ gradeLevel: "6", classAId: "", classBId: "" });
+  };
   const toggleP = pid => {
     const key = tab === "standard" ? "periods" : "availablePeriods";
     const cur = form[key] || [];
@@ -362,19 +397,74 @@ function ClassesPage({ state, setState }) {
   const clearPeriods = () => { const key = tab === "standard" ? "periods" : "availablePeriods"; setForm(f => ({ ...f, [key]: [] })); };
   const curPeriods = (tab === "standard" ? form.periods : form.availablePeriods) || [];
   const list = tab === "standard" ? classes : electives;
+  const getName = id => { const c = classes.find(x => x.id === id); return c ? c.name : id; };
   return (
     React.createElement("div", null,
       React.createElement("div", { className: "page-header" },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Classes"), React.createElement("div", { className: "page-sub" }, "Configure standard classes and electives")),
-          React.createElement("button", { className: "btn btn-primary", onClick: openAdd }, "+ Add " + (tab === "standard" ? "Class" : "Elective"))
+          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Classes"), React.createElement("div", { className: "page-sub" }, "Configure standard classes, electives, and PEAKS pairs")),
+          tab !== "peaks" && React.createElement("button", { className: "btn btn-primary", onClick: openAdd }, "+ Add " + (tab === "standard" ? "Class" : "Elective"))
         )
       ),
       React.createElement("div", { className: "flex", style: { marginBottom: 16 } },
         React.createElement("button", { className: "btn " + (tab === "standard" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("standard") }, "Standard (" + classes.length + ")"),
-        React.createElement("button", { className: "btn " + (tab === "elective" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("elective") }, "Electives (" + electives.length + ")")
+        React.createElement("button", { className: "btn " + (tab === "elective" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("elective") }, "Electives (" + electives.length + ")"),
+        React.createElement("button", { className: "btn " + (tab === "peaks" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("peaks") }, "PEAKS Pairs (" + peaksPairs.length + ")")
       ),
-      React.createElement("div", { className: "card" },
+
+      tab === "peaks" && React.createElement("div", null,
+        React.createElement("div", { className: "alert alert-info", style: { marginBottom: 16 } },
+          "PEAKS is a 2-period consecutive block pairing an ELA class with a History class. Configure one pair per grade. The engine will lock these two classes into consecutive periods for each student."
+        ),
+        React.createElement("div", { className: "card" },
+          React.createElement("div", { className: "card-title" }, "Add PEAKS Pair"),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "120px 1fr 1fr auto", gap: 10, alignItems: "flex-end" } },
+            React.createElement("div", null,
+              React.createElement("label", null, "Grade"),
+              React.createElement("select", { value: pairForm.gradeLevel, onChange: e => setPairForm(f => ({ ...f, gradeLevel: e.target.value })) },
+                React.createElement("option", { value: "6" }, "6th Grade"),
+                React.createElement("option", { value: "7" }, "7th Grade"),
+                React.createElement("option", { value: "8" }, "8th Grade")
+              )
+            ),
+            React.createElement("div", null,
+              React.createElement("label", null, "ELA Class"),
+              React.createElement("select", { value: pairForm.classAId, onChange: e => setPairForm(f => ({ ...f, classAId: e.target.value })) },
+                React.createElement("option", { value: "" }, "-- Select class --"),
+                classes.filter(c => c.gradeLevel === pairForm.gradeLevel || c.gradeLevel === "all").map(c => React.createElement("option", { key: c.id, value: c.id }, c.name))
+              )
+            ),
+            React.createElement("div", null,
+              React.createElement("label", null, "History Class"),
+              React.createElement("select", { value: pairForm.classBId, onChange: e => setPairForm(f => ({ ...f, classBId: e.target.value })) },
+                React.createElement("option", { value: "" }, "-- Select class --"),
+                classes.filter(c => (c.gradeLevel === pairForm.gradeLevel || c.gradeLevel === "all") && c.id !== pairForm.classAId).map(c => React.createElement("option", { key: c.id, value: c.id }, c.name))
+              )
+            ),
+            React.createElement("button", { className: "btn btn-primary", onClick: addPair, disabled: !pairForm.classAId || !pairForm.classBId }, "Add Pair")
+          )
+        ),
+        peaksPairs.length === 0 ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "No PEAKS pairs yet"), React.createElement("div", { className: "empty-sub" }, "Add your ELA + History pairs above"))
+        : React.createElement("div", { className: "card" },
+          React.createElement("div", { className: "card-title" }, "Configured Pairs"),
+          React.createElement("table", null,
+            React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Grade"), React.createElement("th", null, "ELA Class"), React.createElement("th", null, "History Class"), React.createElement("th", null, "Note"), React.createElement("th", null))),
+            React.createElement("tbody", null,
+              peaksPairs.map(pair =>
+                React.createElement("tr", { key: pair.id },
+                  React.createElement("td", null, React.createElement("span", { className: "tag tag-blue" }, pair.gradeLevel + "th Grade")),
+                  React.createElement("td", { style: { color: "var(--text)" } }, getName(pair.classAId)),
+                  React.createElement("td", { style: { color: "var(--text)" } }, getName(pair.classBId)),
+                  React.createElement("td", null, React.createElement("span", { className: "tag tag-yellow" }, "Consecutive - either order")),
+                  React.createElement("td", null, React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => removePair(pair.gradeLevel) }, "Remove"))
+                )
+              )
+            )
+          )
+        )
+      ),
+
+      tab !== "peaks" && React.createElement("div", { className: "card" },
         list.length === 0 ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "Nothing yet"), React.createElement("div", { className: "empty-sub" }, "Click Add to get started")) :
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", null,
@@ -382,7 +472,7 @@ function ClassesPage({ state, setState }) {
               React.createElement("th", null, "Name"),
               tab === "standard" ? React.createElement("th", null, "Grade") : React.createElement("th", null, "Type"),
               tab === "standard" ? React.createElement("th", null, "Flags") : React.createElement("th", null, "Cap"),
-              React.createElement("th", null, "Periods"),
+              React.createElement("th", null, "Period Hints"),
               React.createElement("th", null)
             )),
             React.createElement("tbody", null,
@@ -393,7 +483,9 @@ function ClassesPage({ state, setState }) {
                     ? React.createElement("td", null, item.gradeLevel === "all" ? React.createElement("span", { className: "tag tag-gray" }, "All") : React.createElement("span", { className: "tag tag-blue" }, item.gradeLevel + "th"))
                     : React.createElement("td", null, item.isElaIntervention || item.isMathIntervention ? React.createElement("span", { className: "tag tag-red" }, "Intervention") : item.isYearLong ? React.createElement("span", { className: "tag tag-green" }, "Year-Long") : React.createElement("span", { className: "tag tag-blue" }, "Semester")),
                   tab === "standard"
-                    ? React.createElement("td", null, item.isPeaks && React.createElement("span", { className: "tag tag-yellow" }, "PEAKS"))
+                    ? React.createElement("td", null,
+                        peaksPairs.some(p => p.classAId === item.id || p.classBId === item.id) && React.createElement("span", { className: "tag tag-yellow" }, "PEAKS")
+                      )
                     : React.createElement("td", null, item.maxSize || "25"),
                   React.createElement("td", { style: { fontSize: 11 } },
                     (tab === "standard" ? (item.periods || "") : (item.availablePeriods || "")).split(",").filter(Boolean).map(pid => {
@@ -413,6 +505,7 @@ function ClassesPage({ state, setState }) {
           )
         )
       ),
+
       showModal && React.createElement("div", { className: "modal-overlay", onClick: e => e.target === e.currentTarget && setShowModal(false) },
         React.createElement("div", { className: "modal" },
           React.createElement("div", { className: "modal-title" }, (editing ? "Edit " : "Add ") + (tab === "standard" ? "Standard Class" : "Elective")),
@@ -426,10 +519,6 @@ function ClassesPage({ state, setState }) {
                 React.createElement("option", { value: "7" }, "7th Grade"),
                 React.createElement("option", { value: "8" }, "8th Grade")
               )
-            ),
-            tab === "standard" && React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0 } },
-              React.createElement("input", { type: "checkbox", checked: form.isPeaks || false, onChange: e => setForm(f => ({ ...f, isPeaks: e.target.checked })), style: { width: "auto" } }),
-              React.createElement("span", null, "PEAKS block (2 consecutive periods)")
             ),
             tab === "elective" && React.createElement("div", { className: "grid2" },
               React.createElement("div", null, React.createElement("label", null, "Max Class Size"), React.createElement("input", { type: "number", value: form.maxSize || "25", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })) })),
@@ -470,6 +559,7 @@ function ClassesPage({ state, setState }) {
     )
   );
 }
+
 
 function StudentsPage({ state, setState }) {
   const { students = [] } = state;
@@ -637,34 +727,80 @@ function ConflictsPage({ state, setState }) {
   const autoAssign = () => {
     setAutoRunning(true);
     setTimeout(() => {
+      // Deep clone current run and electives to work on
       let newElectives = state.electives.map(e => ({ ...e }));
       let curRun = activeRun ? JSON.parse(JSON.stringify(activeRun)) : null;
       if (!curRun) { setAutoRunning(false); return; }
+
+      // Track enrollment counts within this run so we don't double-book
+      const enrollCounts = {};
+      curRun.result.assignments.forEach(a => {
+        Object.entries(a.schedule).forEach(([pid, cls]) => {
+          const clean = cls.replace("[E] ", "");
+          const key = clean + "__" + pid;
+          enrollCounts[key] = (enrollCounts[key] || 0) + 1;
+        });
+      });
+
       curRun.result.conflicts.slice().forEach(c => {
         const grade = parseInt(c.student.grade);
+        const sa = curRun.result.assignments.find(a => a.student.student_id === c.student.student_id);
+        if (!sa) return;
+        const usedPids = Object.keys(sa.schedule);
+        const pids = periods.map(p => p.id);
+
         for (const choice of (c.choices || [])) {
-          const eIdx = newElectives.findIndex(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention && (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade));
+          const eIdx = newElectives.findIndex(e =>
+            e.name.toLowerCase() === choice.toLowerCase() &&
+            !e.isElaIntervention && !e.isMathIntervention &&
+            (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade)
+          );
           if (eIdx === -1) continue;
-          const cur = parseInt(newElectives[eIdx].maxSize) || 25;
-          newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(cur + 1) };
+
+          // Bump cap by 1 to make room
+          const oldCap = parseInt(newElectives[eIdx].maxSize) || 25;
+          newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(oldCap + 1) };
+          const newCap = oldCap + 1;
           const el = newElectives[eIdx];
+
+          // Find an open period: not used by student, and enrollment under new cap
           const avail = (el.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
-          const sa = curRun.result.assignments.find(a => a.student.student_id === c.student.student_id);
-          const usedPids = sa ? Object.keys(sa.schedule) : [];
-          const pids = periods.map(p => p.id);
-          const openP = avail.length > 0 ? avail.find(p => !usedPids.includes(p)) : pids.find(p => !usedPids.includes(p));
-          if (openP && sa) {
+          const candidates = avail.length > 0 ? avail : pids;
+          const openP = candidates.find(p => {
+            if (usedPids.includes(p)) return false;
+            const enrolled = enrollCounts[el.name + "__" + p] || 0;
+            return enrolled < newCap;
+          });
+
+          if (openP) {
+            // Apply the assignment
             curRun.result.assignments = curRun.result.assignments.map(a => {
               if (a.student.student_id !== c.student.student_id) return a;
               return { ...a, elective: el.name, schedule: { ...a.schedule, [openP]: "[E] " + el.name }, conflicts: [] };
             });
+            // Track new enrollment
+            enrollCounts[el.name + "__" + openP] = (enrollCounts[el.name + "__" + openP] || 0) + 1;
+            // Remove from conflict list
             curRun.result.conflicts = curRun.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id);
+            break;
           }
-          break;
+          // If still no open period, undo the cap bump and try next choice
+          newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(oldCap) };
         }
       });
-      const updated = { ...curRun, name: curRun.name + "_auto", id: "run_" + Date.now(), date: new Date().toLocaleString(), conflicts: curRun.result.conflicts.length, assigned: state.students.length - curRun.result.conflicts.length };
+
+      const newId = "run_" + Date.now();
+      const updated = {
+        ...curRun,
+        id: newId,
+        name: curRun.name + "_auto",
+        date: new Date().toLocaleString(),
+        conflicts: curRun.result.conflicts.length,
+        assigned: state.students.length - curRun.result.conflicts.length
+      };
+      // Save updated run and switch view to it
       setState(s => ({ ...s, electives: newElectives, runs: [updated, ...s.runs] }));
+      setSelRun(newId);
       setAutoRunning(false);
     }, 400);
   };
@@ -797,7 +933,7 @@ function App() {
   const LABELS = { setup: "School Setup", classes: "Classes & Electives", students: "Students", schedule: "Run Schedule", conflicts: "Conflicts" };
   const isComplete = id => {
     if (id === "setup") return !!(state.schoolName && state.schoolName.trim() && state.periods.length > 0 && state.periods.every(p => p.startTime && p.endTime));
-    if (id === "classes") return state.classes.length > 0 && state.electives.length > 0;
+    if (id === "classes") return state.classes.length > 0 && state.electives.length > 0 && (state.peaksPairs || []).length > 0;
     if (id === "students") return state.students.length > 0;
     if (id === "schedule") return state.runs.length > 0;
     return true;
