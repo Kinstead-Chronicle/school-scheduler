@@ -695,25 +695,64 @@ function exportToExcel(result, state, runName) {
   const { periods } = state;
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: Master Schedule
-  const masterData = periods.map(p => {
-    const participants = assignments
-      .filter(a => a.schedule[p.id])
-      .map(a => a.student.student_name)
-      .join(", ");
-    return {
-      Period: p.label,
-      "Class Name": [...new Set(assignments.filter(a => a.schedule[p.id]).map(a => a.schedule[p.id].replace("[E] ","")))].join(" / ") || "",
-      "Start Time": p.startTime,
-      "End Time": p.endTime,
-      Participants: participants,
-      Count: assignments.filter(a => a.schedule[p.id]).length
-    };
+  // ── Sheet 1: Master Schedule (periods as columns, classes as rows) ──────────
+  // Build unique class list across all periods
+  const classRows = {};
+  assignments.forEach(a => {
+    Object.entries(a.schedule).forEach(([pid, cls]) => {
+      const cleanCls = cls.replace("[E] ", "");
+      if (!classRows[cleanCls]) classRows[cleanCls] = { "Class": cleanCls };
+      if (!classRows[cleanCls][pid]) classRows[cleanCls][pid] = [];
+      classRows[cleanCls][pid].push(a.student.student_name);
+    });
   });
-  const ws1 = XLSX.utils.json_to_sheet(masterData);
+
+  // Build header row: Class | Period 1 (8:30-9:38) | Period 2 ... | Total Students
+  const periodHeaders = periods.map(p => `${p.label}${p.startTime ? " ("+p.startTime+(p.endTime?"-"+p.endTime:"")+")" : ""}`);
+  const masterRows = Object.values(classRows).map(row => {
+    const out = { "Class": row["Class"] };
+    periods.forEach((p, i) => {
+      const students = row[p.id] || [];
+      out[periodHeaders[i]] = students.length > 0 ? students.join(", ") : "";
+    });
+    out["Total Students"] = periods.reduce((sum, p) => sum + (row[p.id] ? row[p.id].length : 0), 0);
+    return out;
+  });
+
+  // Add a summary row at top with period times
+  const timeRow = { "Class": "⏱ Time" };
+  periods.forEach((p, i) => { timeRow[periodHeaders[i]] = p.startTime + (p.endTime ? " – " + p.endTime : ""); });
+  timeRow["Total Students"] = "";
+
+  const ws1 = XLSX.utils.json_to_sheet([timeRow, ...masterRows]);
+  // Set column widths
+  ws1["!cols"] = [{ wch: 28 }, ...periods.map(() => ({ wch: 40 })), { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, ws1, "Master Schedule");
 
-  // Sheet 2: Per-Student
+  // ── Sheet 2: Class Rosters (one section per class) ──────────────────────────
+  const rosterRows = [];
+  Object.values(classRows).forEach(row => {
+    rosterRows.push({ "Class": `── ${row["Class"]} ──`, "Student Name": "", "Student ID": "", "Grade": "", "Period": "" });
+    periods.forEach(p => {
+      const students = row[p.id] || [];
+      students.forEach(name => {
+        const a = assignments.find(x => x.student.student_name === name);
+        rosterRows.push({
+          "Class": row["Class"],
+          "Student Name": name,
+          "Student ID": a?.student.student_id || "",
+          "Grade": a?.student.grade || "",
+          "Period": periods.find(x => x.id === p.id)?.label || p.id
+        });
+      });
+    });
+    rosterRows.push({ "Class": "", "Student Name": "", "Student ID": "", "Grade": "", "Period": "" });
+  });
+  const ws2 = XLSX.utils.json_to_sheet(rosterRows);
+  ws2["!cols"] = [{ wch: 28 }, { wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws2, "Class Rosters");
+
+  // ── Sheet 3: Per-Student Schedule ───────────────────────────────────────────
   const headers = ["Student Name", "Student ID", "Grade", "Designation", ...periods.map(p => p.label), "Elective Assigned"];
   const rows = assignments.map(a => {
     const row = {
@@ -722,24 +761,27 @@ function exportToExcel(result, state, runName) {
       "Grade": a.student.grade,
       "Designation": a.student.designation || "",
     };
-    periods.forEach(p => { row[p.label] = (a.schedule[p.id] || "—").replace("[E] ",""); });
+    periods.forEach(p => { row[p.label] = (a.schedule[p.id] || "—").replace("[E] ", ""); });
     row["Elective Assigned"] = a.elective || "⚠ UNASSIGNED";
     return row;
   });
-  const ws2 = XLSX.utils.json_to_sheet(rows, { header: headers });
-  XLSX.utils.book_append_sheet(wb, ws2, "Per-Student Schedule");
+  const ws3 = XLSX.utils.json_to_sheet(rows, { header: headers });
+  ws3["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 20 }, ...periods.map(() => ({ wch: 20 })), { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, ws3, "Per-Student Schedule");
 
-  // Sheet 3: Conflicts
+  // ── Sheet 4: Conflicts ───────────────────────────────────────────────────────
   if (result.conflicts.length > 0) {
     const conflictData = result.conflicts.map(c => ({
       "Student Name": c.student.student_name,
       "Student ID": c.student.student_id,
       "Grade": c.student.grade,
+      "Designation": c.student.designation || "",
       "Issue": c.reason,
       "Choices Submitted": c.choices ? c.choices.join(", ") : ""
     }));
-    const ws3 = XLSX.utils.json_to_sheet(conflictData);
-    XLSX.utils.book_append_sheet(wb, ws3, "Conflicts");
+    const ws4 = XLSX.utils.json_to_sheet(conflictData);
+    ws4["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 20 }, { wch: 36 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, ws4, "Conflicts");
   }
 
   XLSX.writeFile(wb, `${runName}.xlsx`);
@@ -1333,6 +1375,7 @@ function SchedulePage({ state, setState }) {
                   : <span className="tag tag-green">Clean</span>}
                 <span style={{fontSize:12,color:'var(--text2)'}}>{Math.round((r.assigned/r.totalStudents)*100)}% assigned</span>
                 <button className="btn btn-ghost btn-sm" onClick={() => exportToExcel(r.result, state, r.name)}>↓ Export</button>
+                <button className="btn btn-danger btn-sm" onClick={() => setState(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) }))}>Delete</button>
               </div>
             </div>
           ))}
@@ -1347,9 +1390,43 @@ function ConflictsPage({ state, setState }) {
   const { runs = [], electives = [], periods = [] } = state;
   const [selectedRun, setSelectedRun] = useState(null);
   const [overrides, setOverrides] = useState({});
+  const [previewCap, setPreviewCap] = useState({});
 
-  const activeRun = selectedRun ? runs.find(r => r.id === selectedRun) : runs[0];
+  const activeRunId = selectedRun || runs[0]?.id;
+  const activeRun = runs.find(r => r.id === activeRunId);
   const conflicts = activeRun?.result?.conflicts || [];
+
+  // Get elective availability info for a given elective name
+  const getElectiveInfo = (name) => {
+    const e = electives.find(el => el.name.toLowerCase() === name.toLowerCase());
+    if (!e) return null;
+    const avail = (e.availablePeriods || '').split(',').map(p => p.trim()).filter(Boolean);
+    const periodLabels = avail.map(pid => periods.find(p => p.id === pid)?.label || pid);
+    return { elective: e, periods: periodLabels, cap: parseInt(e.maxSize) || 25 };
+  };
+
+  // Sort electives by availability (most constrained first)
+  const sortedElectives = [...electives]
+    .filter(e => !e.isElaIntervention && !e.isMathIntervention)
+    .sort((a, b) => {
+      const aP = (a.availablePeriods || '').split(',').filter(Boolean).length || 99;
+      const bP = (b.availablePeriods || '').split(',').filter(Boolean).length || 99;
+      return aP - bP;
+    });
+
+  const reRun = () => {
+    const result = runScheduler(state);
+    const run = {
+      id: `run_${Date.now()}`,
+      name: (activeRun?.name || 'Schedule') + '_resolved',
+      date: new Date().toLocaleString(),
+      totalStudents: state.students.length,
+      conflicts: result.conflicts.length,
+      assigned: state.students.length - result.conflicts.length,
+      result
+    };
+    setState(s => ({ ...s, runs: [run, ...s.runs] }));
+  };
 
   return (
     <div>
@@ -1359,11 +1436,16 @@ function ConflictsPage({ state, setState }) {
             <div className="page-title">Conflicts</div>
             <div className="page-sub">Review and manually resolve scheduling conflicts</div>
           </div>
-          {runs.length > 1 && (
-            <select style={{width:'auto'}} value={selectedRun || runs[0]?.id} onChange={e => setSelectedRun(e.target.value)}>
-              {runs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          )}
+          <div className="flex-gap">
+            {runs.length > 1 && (
+              <select style={{width:'auto'}} value={activeRunId} onChange={e => setSelectedRun(e.target.value)}>
+                {runs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            )}
+            {conflicts.length > 0 && (
+              <button className="btn btn-primary" onClick={reRun}>↺ Re-run Schedule</button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1379,72 +1461,129 @@ function ConflictsPage({ state, setState }) {
         <div className="alert alert-success">✓ No conflicts in this run — all students were successfully assigned.</div>
       )}
 
-      {conflicts.map((c, i) => (
-        <div key={i} className="conflict-card">
-          <div className="conflict-header">
-            <div>
-              <div className="conflict-name">{c.student.student_name}</div>
-              <div style={{fontSize:11,color:'var(--text3)'}}>{c.student.student_id} · Grade {c.student.grade} {c.student.designation ? `· ${c.student.designation}` : ""}</div>
+      {conflicts.map((c, i) => {
+        const selectedElective = overrides[c.student.student_id];
+        const info = selectedElective ? getElectiveInfo(selectedElective) : null;
+        const capOverride = previewCap[c.student.student_id];
+
+        return (
+          <div key={i} className="conflict-card">
+            <div className="conflict-header">
+              <div>
+                <div className="conflict-name">{c.student.student_name}</div>
+                <div style={{fontSize:11,color:'var(--text3)'}}>{c.student.student_id} · Grade {c.student.grade}{c.student.designation ? ` · ${c.student.designation}` : ""}</div>
+              </div>
+              <span className="tag tag-red">Unassigned</span>
             </div>
-            <span className="tag tag-red">Unassigned</span>
-          </div>
-          <div className="conflict-reason">⚠ {c.reason}</div>
-          <div style={{marginBottom:8}}>
-            <span style={{fontSize:11,color:'var(--text3)'}}>Submitted choices: </span>
-            {(c.choices||[]).map(ch => <span key={ch} className="tag tag-gray" style={{marginRight:2}}>{ch}</span>)}
-          </div>
-          <div style={{display:'flex',gap:8,alignItems:'center'}}>
-            <select
-              style={{width:'auto',flex:1}}
-              value={overrides[c.student.student_id] || ""}
-              onChange={e => setOverrides(o => ({ ...o, [c.student.student_id]: e.target.value }))}
-            >
-              <option value="">— Manually assign elective —</option>
-              {electives.filter(e => !e.isElaIntervention && !e.isMathIntervention).map(e => (
-                <option key={e.id} value={e.name}>{e.name}</option>
-              ))}
-            </select>
-            <button
-              className="btn btn-primary btn-sm"
-              disabled={!overrides[c.student.student_id]}
-              onClick={() => {
-                // Apply override to latest run result
-                const override = overrides[c.student.student_id];
-                setState(s => {
-                  const runs = s.runs.map(r => {
-                    if (r.id !== (selectedRun || s.runs[0]?.id)) return r;
-                    const updated = {
-                      ...r,
-                      conflicts: r.result.conflicts - 1,
-                      assigned: r.result.assigned + 1,
-                      result: {
-                        ...r.result,
-                        assignments: r.result.assignments.map(a => {
-                          if (a.student.student_id !== c.student.student_id) return a;
-                          const openPeriod = periods.find(p => !a.schedule[p.id]);
-                          if (openPeriod) {
-                            return { ...a, elective: override, schedule: { ...a.schedule, [openPeriod.id]: `[E] ${override}` } };
-                          }
-                          return { ...a, elective: override };
-                        }),
-                        conflicts: r.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id)
-                      }
-                    };
-                    return updated;
+            <div className="conflict-reason">⚠ {c.reason}</div>
+            <div style={{marginBottom:12}}>
+              <span style={{fontSize:11,color:'var(--text3)'}}>Submitted choices: </span>
+              {(c.choices||[]).map(ch => <span key={ch} className="tag tag-gray" style={{marginRight:2}}>{ch}</span>)}
+            </div>
+
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+              <div>
+                <label>Assign elective <span style={{color:'var(--text3)',fontSize:10}}>(sorted by availability — most constrained first)</span></label>
+                <select
+                  value={selectedElective || ""}
+                  onChange={e => {
+                    setOverrides(o => ({ ...o, [c.student.student_id]: e.target.value }));
+                    setPreviewCap(p => { const n = {...p}; delete n[c.student.student_id]; return n; });
+                  }}
+                >
+                  <option value="">— Select elective —</option>
+                  {sortedElectives.map(e => {
+                    const ps = (e.availablePeriods || '').split(',').filter(Boolean);
+                    const label = ps.length === 1 ? ` (${periods.find(p=>p.id===ps[0])?.label || ps[0]} only)`
+                      : ps.length > 1 ? ` (${ps.length} periods)` : ' (any period)';
+                    return <option key={e.id} value={e.name}>{e.name}{label}</option>;
+                  })}
+                </select>
+              </div>
+
+              {info && (
+                <div>
+                  <label>Adjust class size cap <span style={{color:'var(--text3)',fontSize:10}}>(current: {info.cap})</span></label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={capOverride !== undefined ? capOverride : info.cap}
+                    onChange={e => setPreviewCap(p => ({ ...p, [c.student.student_id]: parseInt(e.target.value) || info.cap }))}
+                  />
+                </div>
+              )}
+            </div>
+
+            {info && (
+              <div className="alert alert-info" style={{marginBottom:12}}>
+                <div>
+                  <div style={{marginBottom:4}}>
+                    <strong>{info.elective.name}</strong>
+                    {info.elective.isYearLong ? <span className="tag tag-green" style={{marginLeft:6}}>Year-Long</span> : <span className="tag tag-blue" style={{marginLeft:6}}>Semester</span>}
+                  </div>
+                  <div style={{fontSize:11}}>
+                    Available periods: {info.periods.length > 0 ? info.periods.join(', ') : 'Any period'}
+                    &nbsp;·&nbsp;
+                    Cap: {capOverride !== undefined ? capOverride : info.cap} students
+                    {capOverride !== undefined && capOverride !== info.cap && (
+                      <span style={{color:'var(--accent3)',marginLeft:6}}>⚠ Cap will be updated on Apply</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{display:'flex',justifyContent:'flex-end'}}>
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={!selectedElective}
+                onClick={() => {
+                  const override = selectedElective;
+                  const newCap = previewCap[c.student.student_id];
+                  setState(s => {
+                    // Update elective cap if changed
+                    let newElectives = s.electives;
+                    if (newCap !== undefined && info) {
+                      newElectives = s.electives.map(e =>
+                        e.id === info.elective.id ? { ...e, maxSize: String(newCap) } : e
+                      );
+                    }
+                    const runs = s.runs.map(r => {
+                      if (r.id !== activeRunId) return r;
+                      return {
+                        ...r,
+                        conflicts: r.conflicts - 1,
+                        assigned: r.assigned + 1,
+                        result: {
+                          ...r.result,
+                          assignments: r.result.assignments.map(a => {
+                            if (a.student.student_id !== c.student.student_id) return a;
+                            const openPeriod = periods.find(p => !a.schedule[p.id]);
+                            if (openPeriod) {
+                              return { ...a, elective: override, schedule: { ...a.schedule, [openPeriod.id]: `[E] ${override}` } };
+                            }
+                            return { ...a, elective: override };
+                          }),
+                          conflicts: r.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id)
+                        }
+                      };
+                    });
+                    return { ...s, electives: newElectives, runs };
                   });
-                  return { ...s, runs };
-                });
-                setOverrides(o => { const n = {...o}; delete n[c.student.student_id]; return n; });
-              }}
-            >
-              Apply
-            </button>
+                  setOverrides(o => { const n = {...o}; delete n[c.student.student_id]; return n; });
+                  setPreviewCap(p => { const n = {...p}; delete n[c.student.student_id]; return n; });
+                }}
+              >
+                Apply
+              </button>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
+
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function App() {
@@ -1471,6 +1610,31 @@ function App() {
   }, []);
 
   const conflictCount = state.runs[0]?.result?.conflicts?.length || 0;
+
+  const STEPS = ["setup", "classes", "students", "schedule", "conflicts"];
+  const STEP_LABELS = {
+    setup: "School Setup",
+    classes: "Classes & Electives",
+    students: "Students",
+    schedule: "Run Schedule",
+    conflicts: "Conflicts"
+  };
+
+  const isStepComplete = (id) => {
+    switch(id) {
+      case "setup":
+        return !!(state.schoolName && state.schoolName.trim() && state.periods.length > 0 && state.periods.every(p => p.startTime && p.endTime));
+      case "classes":
+        return state.classes.length > 0 && state.electives.length > 0;
+      case "students":
+        return state.students.length > 0;
+      case "schedule":
+        return state.runs.length > 0;
+      case "conflicts":
+        return true;
+      default: return false;
+    }
+  };
 
   const navItems = [
     { id: "setup", label: "School Setup", section: "Configure" },
@@ -1504,6 +1668,9 @@ function App() {
                     <div className="dot" />
                     {item.label}
                     {item.badge && <span className="nav-badge">{item.badge}</span>}
+                    {!item.badge && isStepComplete(item.id) && page !== item.id && (
+                      <span style={{marginLeft:'auto',color:'var(--accent)',fontSize:12}}>✓</span>
+                    )}
                   </div>
                 </React.Fragment>
               ));
@@ -1520,6 +1687,25 @@ function App() {
           {page === "students" && <StudentsPage state={state} setState={setState} />}
           {page === "schedule" && <SchedulePage state={state} setState={setState} />}
           {page === "conflicts" && <ConflictsPage state={state} setState={setState} />}
+          {page !== "conflicts" && (() => {
+            const idx = STEPS.indexOf(page);
+            const nextStep = STEPS[idx + 1];
+            const canAdvance = isStepComplete(page);
+            return (
+              <div style={{marginTop:32,paddingTop:20,borderTop:'1px solid var(--border)',display:'flex',justifyContent:'flex-end',alignItems:'center',gap:12}}>
+                {!canAdvance && (
+                  <span style={{fontSize:11,color:'var(--text3)'}}>Complete this step to continue</span>
+                )}
+                <button
+                  className="btn btn-primary"
+                  disabled={!canAdvance}
+                  onClick={() => setPage(nextStep)}
+                >
+                  Next: {STEP_LABELS[nextStep]} →
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
