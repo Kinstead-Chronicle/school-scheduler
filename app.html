@@ -9,1841 +9,844 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0f0f11;
-    --surface: #17171a;
-    --surface2: #1e1e23;
-    --surface3: #26262d;
-    --border: #2e2e38;
-    --accent: #7ef0a2;
-    --accent2: #4fc8ff;
-    --accent3: #ffb547;
-    --danger: #ff6b6b;
-    --text: #f0f0f0;
-    --text2: #9999aa;
-    --text3: #666677;
-    --mono: 'DM Mono', monospace;
-    --serif: 'Fraunces', serif;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; min-height: 100vh; }
-  
-  /* UPDATE BANNER */
-  .update-banner {
-    background: var(--accent3);
-    color: #1a1a00;
-    padding: 10px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    font-weight: 500;
-    font-size: 12px;
-  }
-  .update-banner button {
-    background: #1a1a00;
-    color: var(--accent3);
-    border: none;
-    padding: 4px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  /* LAYOUT */
-  .shell { display: flex; height: 100vh; overflow: hidden; }
-  .sidebar {
-    width: 220px;
-    min-width: 220px;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  .main { flex: 1; overflow-y: auto; padding: 32px; }
-
-  /* SIDEBAR */
-  .logo {
-    padding: 24px 20px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .logo-title {
-    font-family: var(--serif);
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--accent);
-    line-height: 1.2;
-  }
-  .logo-sub {
-    font-size: 10px;
-    color: var(--text3);
-    margin-top: 3px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .nav { padding: 12px 0; flex: 1; }
-  .nav-section {
-    padding: 8px 20px 4px;
-    font-size: 9px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text3);
-  }
-  .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 20px;
-    cursor: pointer;
-    color: var(--text2);
-    font-size: 12px;
-    transition: all 0.15s;
-    border-left: 2px solid transparent;
-  }
-  .nav-item:hover { color: var(--text); background: var(--surface2); }
-  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--surface2); }
-  .nav-item .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--text3); flex-shrink: 0;
-  }
-  .nav-item.active .dot { background: var(--accent); }
-  .nav-badge {
-    margin-left: auto;
-    background: var(--danger);
-    color: white;
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 10px;
-    min-width: 18px;
-    text-align: center;
-  }
-  .sidebar-footer {
-    padding: 12px 20px;
-    border-top: 1px solid var(--border);
-    font-size: 10px;
-    color: var(--text3);
-  }
-  .version-tag { font-size: 10px; color: var(--text3); }
-
-  /* PAGE HEADER */
-  .page-header { margin-bottom: 28px; }
-  .page-title {
-    font-family: var(--serif);
-    font-size: 28px;
-    font-weight: 300;
-    color: var(--text);
-    margin-bottom: 4px;
-  }
-  .page-sub { color: var(--text2); font-size: 12px; }
-
-  /* CARDS */
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 16px;
-  }
-  .card-title {
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text3);
-    margin-bottom: 14px;
-  }
-
-  /* GRID */
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-
-  /* FORM ELEMENTS */
-  label { font-size: 11px; color: var(--text2); display: block; margin-bottom: 5px; }
-  input, select, textarea {
-    width: 100%;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 12px;
-    padding: 8px 10px;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
-  input::placeholder { color: var(--text3); }
-  select option { background: var(--surface2); }
-
-  /* BUTTONS */
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border-radius: 5px;
-    border: none;
-    cursor: pointer;
-    font-family: var(--mono);
-    font-size: 12px;
-    font-weight: 500;
-    transition: all 0.15s;
-  }
-  .btn-primary { background: var(--accent); color: #0a1a10; }
-  .btn-primary:hover { background: #9af5b8; }
-  .btn-secondary { background: var(--surface3); color: var(--text); border: 1px solid var(--border); }
-  .btn-secondary:hover { background: var(--surface2); border-color: var(--text3); }
-  .btn-danger { background: var(--danger); color: white; }
-  .btn-danger:hover { background: #ff8888; }
-  .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
-  .btn-ghost:hover { color: var(--text); border-color: var(--text3); }
-  .btn-sm { padding: 5px 10px; font-size: 11px; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  /* TABLE */
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th {
-    text-align: left;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text3);
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  td {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--text2);
-  }
-  tr:hover td { background: var(--surface2); color: var(--text); }
-  tr:last-child td { border-bottom: none; }
-
-  /* TAGS */
-  .tag {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 500;
-    margin: 1px;
-  }
-  .tag-green { background: rgba(126,240,162,0.15); color: var(--accent); border: 1px solid rgba(126,240,162,0.25); }
-  .tag-blue { background: rgba(79,200,255,0.15); color: var(--accent2); border: 1px solid rgba(79,200,255,0.25); }
-  .tag-yellow { background: rgba(255,181,71,0.15); color: var(--accent3); border: 1px solid rgba(255,181,71,0.25); }
-  .tag-red { background: rgba(255,107,107,0.15); color: var(--danger); border: 1px solid rgba(255,107,107,0.25); }
-  .tag-gray { background: var(--surface3); color: var(--text2); border: 1px solid var(--border); }
-
-  /* STAT CARDS */
-  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-  .stat-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
-  }
-  .stat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
-  .stat-value { font-family: var(--serif); font-size: 28px; font-weight: 300; color: var(--text); }
-  .stat-sub { font-size: 10px; color: var(--text3); margin-top: 2px; }
-
-  /* UPLOAD ZONE */
-  .upload-zone {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .upload-zone:hover { border-color: var(--accent); background: rgba(126,240,162,0.03); }
-  .upload-zone.dragover { border-color: var(--accent); background: rgba(126,240,162,0.06); }
-  .upload-icon { font-size: 32px; margin-bottom: 10px; }
-  .upload-label { color: var(--text2); font-size: 13px; margin-bottom: 4px; }
-  .upload-sub { color: var(--text3); font-size: 11px; }
-
-  /* PROGRESS */
-  .progress-bar {
-    height: 4px;
-    background: var(--surface3);
-    border-radius: 2px;
-    overflow: hidden;
-    margin: 8px 0;
-  }
-  .progress-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 2px;
-    transition: width 0.3s;
-  }
-
-  /* ALERTS */
-  .alert {
-    padding: 12px 14px;
-    border-radius: 6px;
-    font-size: 12px;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
-  .alert-warn { background: rgba(255,181,71,0.1); border: 1px solid rgba(255,181,71,0.25); color: var(--accent3); }
-  .alert-error { background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.25); color: var(--danger); }
-  .alert-success { background: rgba(126,240,162,0.1); border: 1px solid rgba(126,240,162,0.25); color: var(--accent); }
-  .alert-info { background: rgba(79,200,255,0.1); border: 1px solid rgba(79,200,255,0.25); color: var(--accent2); }
-
-  /* EMPTY STATE */
-  .empty { text-align: center; padding: 60px 20px; color: var(--text3); }
-  .empty-icon { font-size: 40px; margin-bottom: 12px; }
-  .empty-title { font-family: var(--serif); font-size: 18px; color: var(--text2); margin-bottom: 6px; }
-  .empty-sub { font-size: 12px; }
-
-  /* DIVIDER */
-  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
-
-  /* FLEX UTILS */
-  .flex { display: flex; }
-  .flex-between { display: flex; align-items: center; justify-content: space-between; }
-  .flex-gap { display: flex; align-items: center; gap: 10px; }
-  .flex-col { display: flex; flex-direction: column; gap: 12px; }
-  .mt-8 { margin-top: 8px; }
-  .mt-16 { margin-top: 16px; }
-  .mb-8 { margin-bottom: 8px; }
-  .mb-16 { margin-bottom: 16px; }
-
-  /* PERIOD ROW */
-  .period-row {
-    display: grid;
-    grid-template-columns: 80px 1fr 100px 100px 120px auto;
-    gap: 8px;
-    align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .period-row:last-child { border-bottom: none; }
-
-  /* CLASS ROW */
-  .class-row {
-    display: grid;
-    grid-template-columns: 1fr 120px 80px 120px auto;
-    gap: 8px;
-    align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .class-row:last-child { border-bottom: none; }
-
-  /* CONFLICT CARD */
-  .conflict-card {
-    background: var(--surface);
-    border: 1px solid rgba(255,107,107,0.3);
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 10px;
-  }
-  .conflict-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .conflict-name { font-weight: 500; color: var(--text); }
-  .conflict-reason { font-size: 11px; color: var(--danger); margin-bottom: 8px; }
-
-  /* RUN HISTORY */
-  .run-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .run-item:last-child { border-bottom: none; }
-
-  /* SCROLLBAR */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--border); }
-
-  /* MODAL */
-  .modal-overlay {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.7);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 100;
-  }
-  .modal {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 24px;
-    width: 480px;
-    max-width: 90vw;
-    max-height: 80vh;
-    overflow-y: auto;
-  }
-  .modal-title { font-family: var(--serif); font-size: 20px; margin-bottom: 16px; }
-  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+:root {
+  --bg: #0f0f11; --surface: #17171a; --surface2: #1e1e23; --surface3: #26262d;
+  --border: #2e2e38; --accent: #7ef0a2; --accent2: #4fc8ff; --accent3: #ffb547;
+  --danger: #ff6b6b; --text: #f0f0f0; --text2: #9999aa; --text3: #666677;
+  --mono: 'DM Mono', monospace; --serif: 'Fraunces', serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; min-height: 100vh; }
+.update-bar { background: var(--accent3); color: #1a1a00; padding: 10px 20px; display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 12px; font-weight: 500; }
+.update-bar button { background: #1a1a00; color: var(--accent3); border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: var(--mono); font-size: 11px; }
+.shell { display: flex; height: 100vh; overflow: hidden; }
+.sidebar { width: 220px; min-width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+.main { flex: 1; overflow-y: auto; padding: 32px; }
+.logo { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
+.logo-title { font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--accent); line-height: 1.2; }
+.logo-sub { font-size: 10px; color: var(--text3); margin-top: 3px; letter-spacing: 0.05em; text-transform: uppercase; }
+.nav { padding: 12px 0; flex: 1; }
+.nav-section { padding: 8px 20px 4px; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 20px; cursor: pointer; color: var(--text2); font-size: 12px; transition: all 0.15s; border-left: 2px solid transparent; }
+.nav-item:hover { color: var(--text); background: var(--surface2); }
+.nav-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--surface2); }
+.nav-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+.nav-item.active .nav-dot { background: var(--accent); }
+.nav-badge { margin-left: auto; background: var(--danger); color: white; font-size: 10px; padding: 1px 6px; border-radius: 10px; }
+.nav-check { margin-left: auto; color: var(--accent); font-size: 12px; }
+.sidebar-footer { padding: 12px 20px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text3); }
+.page-header { margin-bottom: 28px; }
+.page-title { font-family: var(--serif); font-size: 28px; font-weight: 300; color: var(--text); margin-bottom: 4px; }
+.page-sub { color: var(--text2); font-size: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+.card-title { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); margin-bottom: 14px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+label { font-size: 11px; color: var(--text2); display: block; margin-bottom: 5px; }
+input, select, textarea { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-family: var(--mono); font-size: 12px; padding: 8px 10px; outline: none; transition: border-color 0.15s; }
+input:focus, select:focus { border-color: var(--accent); }
+input::placeholder { color: var(--text3); }
+select option { background: var(--surface2); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 5px; border: none; cursor: pointer; font-family: var(--mono); font-size: 12px; font-weight: 500; transition: all 0.15s; }
+.btn-primary { background: var(--accent); color: #0a1a10; }
+.btn-primary:hover { background: #9af5b8; }
+.btn-secondary { background: var(--surface3); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { background: var(--surface2); }
+.btn-danger { background: var(--danger); color: white; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-ghost:hover { color: var(--text); border-color: var(--text3); }
+.btn-sm { padding: 5px 10px; font-size: 11px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); padding: 8px 12px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text2); }
+tr:hover td { background: var(--surface2); color: var(--text); }
+tr:last-child td { border-bottom: none; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 500; margin: 1px; }
+.tag-green { background: rgba(126,240,162,0.15); color: var(--accent); border: 1px solid rgba(126,240,162,0.25); }
+.tag-blue { background: rgba(79,200,255,0.15); color: var(--accent2); border: 1px solid rgba(79,200,255,0.25); }
+.tag-yellow { background: rgba(255,181,71,0.15); color: var(--accent3); border: 1px solid rgba(255,181,71,0.25); }
+.tag-red { background: rgba(255,107,107,0.15); color: var(--danger); border: 1px solid rgba(255,107,107,0.25); }
+.tag-gray { background: var(--surface3); color: var(--text2); border: 1px solid var(--border); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.stat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+.stat-value { font-family: var(--serif); font-size: 28px; font-weight: 300; color: var(--text); }
+.upload-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.15s; }
+.upload-zone:hover { border-color: var(--accent); background: rgba(126,240,162,0.03); }
+.alert { padding: 12px 14px; border-radius: 6px; font-size: 12px; margin-bottom: 12px; }
+.alert-warn { background: rgba(255,181,71,0.1); border: 1px solid rgba(255,181,71,0.25); color: var(--accent3); }
+.alert-error { background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.25); color: var(--danger); }
+.alert-success { background: rgba(126,240,162,0.1); border: 1px solid rgba(126,240,162,0.25); color: var(--accent); }
+.alert-info { background: rgba(79,200,255,0.1); border: 1px solid rgba(79,200,255,0.25); color: var(--accent2); }
+.empty { text-align: center; padding: 60px 20px; color: var(--text3); }
+.empty-title { font-family: var(--serif); font-size: 18px; color: var(--text2); margin-bottom: 6px; }
+.empty-sub { font-size: 12px; }
+.row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: none; }
+.flex { display: flex; align-items: center; gap: 10px; }
+.flex-col { display: flex; flex-direction: column; gap: 12px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; width: 480px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+.modal-title { font-family: var(--serif); font-size: 20px; margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+.conflict-card { background: var(--surface); border: 1px solid rgba(255,107,107,0.3); border-radius: 8px; padding: 16px; margin-bottom: 10px; }
+.period-pill { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; padding: 5px 10px; min-width: 90px; }
+.period-pill-empty { border-color: rgba(255,107,107,0.3); background: rgba(255,107,107,0.05); }
+.next-bar { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useCallback, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.4";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
 
-// ─── STORAGE ────────────────────────────────────────────────────────────────
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-function saveState(state) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
-}
+const BLANK = { schoolName: "", lunchStart: "", lunchEnd: "", numPeriods: 6, periods: [], classes: [], electives: [], students: [], runs: [] };
 
-const DEFAULT_STATE = {
-  schoolName: "",
-  numPeriods: 6,
-  periods: [],
-  classes: [],
-  electives: [],
-  students: [],
-  runs: [],
-};
-
-// ─── SCHEDULING ENGINE ───────────────────────────────────────────────────────
-//
-// Strategy: constraint-based auto-scheduling
-//
-// The engine figures out period assignments automatically based on how
-// constrained each class/student is. Most constrained scheduled first.
-//
-// Pass order:
-//   1. Lock single-period classes into their fixed period
-//   2. Lock PEAKS blocks (2 consecutive periods per grade)
-//   3. ELA/Math intervention students (go 1st period per school rule)
-//   4. Students with single-period-only class requirements (Biology, Geometry, Spanish 1)
-//   5. Remaining designated students (Accelerated, ESE)
-//   6. General population — most constrained elective choices first
+function load() { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
+function save(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {} }
 
 function runScheduler(state) {
   const { periods, classes, electives, students } = state;
   if (!students.length || !periods.length) return { assignments: [], conflicts: [] };
-
-  const periodIds = periods.map(p => p.id);
-
-  // ── Build constraint maps ──────────────────────────────────────────────────
-
-  // Classes that are locked to a single period
-  const singlePeriodClasses = new Set();
-  const classPeriodMap = {}; // classId -> [periodIds]
+  const pids = periods.map(p => p.id);
+  const classPMap = {};
+  const singlePeriod = new Set();
   classes.forEach(c => {
-    const ps = (c.periods || '').split(',').map(p => p.trim()).filter(Boolean);
-    classPeriodMap[c.id] = ps.length ? ps : [...periodIds];
-    if (ps.length === 1) singlePeriodClasses.add(c.id);
+    const ps = (c.periods || "").split(",").map(x => x.trim()).filter(Boolean);
+    classPMap[c.id] = ps.length ? ps : [...pids];
+    if (ps.length === 1) singlePeriod.add(c.id);
   });
-
-  const electivePeriodMap = {}; // electiveId -> [periodIds]
+  const electivePMap = {};
   electives.forEach(e => {
-    const ps = (e.availablePeriods || '').split(',').map(p => p.trim()).filter(Boolean);
-    electivePeriodMap[e.id] = ps.length ? ps : [...periodIds];
+    const ps = (e.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
+    electivePMap[e.id] = ps.length ? ps : [...pids];
   });
-
-  // Enrollment tracker: classId_periodId -> count
-  const enrollment = {};
-  const enrollKey = (cid, pid) => `${cid}__${pid}`;
-  const getEnroll = (cid, pid) => enrollment[enrollKey(cid, pid)] || 0;
-  const addEnroll = (cid, pid) => { enrollment[enrollKey(cid, pid)] = getEnroll(cid, pid) + 1; };
-  const getCap = (item) => parseInt(item.maxSize) || 25;
-
-  const conflicts = [];
-
-  // ── Helper: find open period for a class ──────────────────────────────────
-  const findOpenPeriod = (classItem, usedPeriods, availablePeriods) => {
-    const candidates = availablePeriods || classPeriodMap[classItem.id] || periodIds;
-    return candidates.find(pid =>
-      !usedPeriods.has(pid) &&
-      getEnroll(classItem.id, pid) < getCap(classItem)
-    ) || null;
-  };
-
-  // ── Compute student constraint score ──────────────────────────────────────
-  // Higher score = more constrained = schedule first
-  const getConstraintScore = (student) => {
-    let score = 0;
+  const enroll = {};
+  const ekey = (c, p) => c + "__" + p;
+  const getE = (c, p) => enroll[ekey(c, p)] || 0;
+  const addE = (c, p) => { enroll[ekey(c, p)] = getE(c, p) + 1; };
+  const cap = item => parseInt(item.maxSize) || 25;
+  const getChoices = s => { const ch = []; for (let i = 1; i <= 12; i++) { const v = s["choice_" + i]; if (v && v.trim()) ch.push(v.trim()); } return ch; };
+  const score = student => {
+    let sc = 0;
     const grade = parseInt(student.grade);
-    const desigs = (student.designation || '').split('|').map(d => d.trim()).filter(Boolean);
-
-    // Intervention students: highest priority
-    if (desigs.includes('ELA Intervention') || desigs.includes('Math Intervention')) score += 1000;
-
-    // Single-period-only class requirements for this student's grade
-    const gradeClasses = classes.filter(c =>
-      c.gradeLevel === String(grade) || c.gradeLevel === 'all' || !c.gradeLevel
-    );
-    gradeClasses.forEach(c => {
-      const ps = classPeriodMap[c.id] || [];
-      if (ps.length === 1) score += 500; // locked to one period
-      else if (ps.length <= 2) score += 100;
+    const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
+    if (desigs.includes("ELA Intervention") || desigs.includes("Math Intervention")) sc += 1000;
+    if (desigs.includes("ESE")) sc += 300;
+    if (desigs.includes("Accelerated")) sc += 200;
+    classes.filter(c => c.gradeLevel === String(grade) || c.gradeLevel === "all" || !c.gradeLevel).forEach(c => {
+      const ps = classPMap[c.id] || [];
+      if (ps.length === 1) sc += 500;
+      else if (ps.length <= 2) sc += 100;
     });
-
-    // Constrained elective choices
-    const choices = getChoices(student);
-    choices.forEach(name => {
+    getChoices(student).forEach(name => {
       const e = electives.find(el => el.name.toLowerCase() === name.toLowerCase());
-      if (e) {
-        const ps = electivePeriodMap[e.id] || [];
-        if (ps.length === 1) score += 200;
-        else if (ps.length <= 2) score += 50;
-      }
+      if (e) { const ps = electivePMap[e.id] || []; if (ps.length === 1) sc += 200; else if (ps.length <= 2) sc += 50; }
     });
-
-    // Other designations
-    if (desigs.includes('ESE')) score += 300;
-    if (desigs.includes('Accelerated')) score += 200;
-
-    return score;
+    return sc;
   };
-
-  const getChoices = (student) => {
-    const choices = [];
-    for (let i = 1; i <= 12; i++) {
-      const v = student[`choice_${i}`];
-      if (v && v.trim()) choices.push(v.trim());
-    }
-    return choices;
-  };
-
-  // ── Sort students by constraint score descending ───────────────────────────
-  const sorted = [...students].sort((a, b) => getConstraintScore(b) - getConstraintScore(a));
-
-  // ── Schedule each student ──────────────────────────────────────────────────
+  const sorted = [...students].sort((a, b) => score(b) - score(a));
+  const conflicts = [];
   const assignments = sorted.map(student => {
     const grade = parseInt(student.grade);
-    const desigs = (student.designation || '').split('|').map(d => d.trim()).filter(Boolean);
-    const schedule = {}; // periodId -> className
-    const usedPeriods = new Set();
-
-    // Get all standard classes for this student's grade
-    const gradeClasses = classes.filter(c =>
-      c.gradeLevel === String(grade) || c.gradeLevel === 'all' || !c.gradeLevel
-    );
-
-    // ── Step 1: Assign PEAKS block first (most rigid — 2 consecutive periods) ─
-    const peaksClass = gradeClasses.find(c => c.isPeaks);
-    if (peaksClass) {
-      const peaksPeriods = (peaksClass.periods || '').split(',').map(p => p.trim()).filter(Boolean);
-      // Find two consecutive available periods
+    const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
+    const schedule = {};
+    const used = new Set();
+    const gradeClasses = classes.filter(c => c.gradeLevel === String(grade) || c.gradeLevel === "all" || !c.gradeLevel);
+    const peaks = gradeClasses.find(c => c.isPeaks);
+    if (peaks) {
+      const pp = (peaks.periods || "").split(",").map(x => x.trim()).filter(Boolean);
       let placed = false;
-      for (let i = 0; i < periodIds.length - 1; i++) {
-        const p1 = periodIds[i], p2 = periodIds[i + 1];
-        if (
-          !usedPeriods.has(p1) && !usedPeriods.has(p2) &&
-          (peaksPeriods.length === 0 || (peaksPeriods.includes(p1) && peaksPeriods.includes(p2))) &&
-          getEnroll(peaksClass.id, p1) < getCap(peaksClass) &&
-          getEnroll(peaksClass.id, p2) < getCap(peaksClass)
-        ) {
-          schedule[p1] = peaksClass.name;
-          schedule[p2] = peaksClass.name + ' (cont.)';
-          usedPeriods.add(p1);
-          usedPeriods.add(p2);
-          addEnroll(peaksClass.id, p1);
-          addEnroll(peaksClass.id, p2);
-          placed = true;
-          break;
+      for (let i = 0; i < pids.length - 1; i++) {
+        const p1 = pids[i], p2 = pids[i + 1];
+        if (!used.has(p1) && !used.has(p2) && (pp.length === 0 || (pp.includes(p1) && pp.includes(p2))) && getE(peaks.id, p1) < cap(peaks) && getE(peaks.id, p2) < cap(peaks)) {
+          schedule[p1] = peaks.name; schedule[p2] = peaks.name + " (cont.)";
+          used.add(p1); used.add(p2); addE(peaks.id, p1); addE(peaks.id, p2); placed = true; break;
         }
       }
       if (!placed) {
-        // Fallback: place in any two open periods
-        const openPairs = [];
-        for (let i = 0; i < periodIds.length - 1; i++) {
-          if (!usedPeriods.has(periodIds[i]) && !usedPeriods.has(periodIds[i+1])) {
-            openPairs.push([periodIds[i], periodIds[i+1]]);
-          }
-        }
-        if (openPairs.length > 0) {
-          const [p1, p2] = openPairs[0];
-          schedule[p1] = peaksClass.name;
-          schedule[p2] = peaksClass.name + ' (cont.)';
-          usedPeriods.add(p1); usedPeriods.add(p2);
-          addEnroll(peaksClass.id, p1); addEnroll(peaksClass.id, p2);
-        }
-      }
-    }
-
-    // ── Step 2: Assign intervention if designated ──────────────────────────
-    if (desigs.includes('ELA Intervention')) {
-      const intClass = electives.find(e => e.isElaIntervention);
-      if (intClass) {
-        // School rule: intervention goes 1st period when possible
-        const preferredPeriod = periodIds[0];
-        if (!usedPeriods.has(preferredPeriod) && getEnroll(intClass.id, preferredPeriod) < (parseInt(intClass.maxSize) || 15)) {
-          schedule[preferredPeriod] = intClass.name;
-          usedPeriods.add(preferredPeriod);
-          addEnroll(intClass.id, preferredPeriod);
-        } else {
-          // Fall back to any open period
-          const avail = (electivePeriodMap[intClass.id] || periodIds);
-          const open = avail.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
-          if (open) {
-            schedule[open] = intClass.name;
-            usedPeriods.add(open);
-            addEnroll(intClass.id, open);
+        for (let i = 0; i < pids.length - 1; i++) {
+          if (!used.has(pids[i]) && !used.has(pids[i + 1])) {
+            schedule[pids[i]] = peaks.name; schedule[pids[i + 1]] = peaks.name + " (cont.)";
+            used.add(pids[i]); used.add(pids[i + 1]); addE(peaks.id, pids[i]); addE(peaks.id, pids[i + 1]); break;
           }
         }
       }
     }
-
-    if (desigs.includes('Math Intervention')) {
-      const intClass = electives.find(e => e.isMathIntervention);
-      if (intClass) {
-        const preferredPeriod = periodIds[0];
-        if (!usedPeriods.has(preferredPeriod) && getEnroll(intClass.id, preferredPeriod) < (parseInt(intClass.maxSize) || 15)) {
-          schedule[preferredPeriod] = intClass.name;
-          usedPeriods.add(preferredPeriod);
-          addEnroll(intClass.id, preferredPeriod);
-        } else {
-          const avail = (electivePeriodMap[intClass.id] || periodIds);
-          const open = avail.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
-          if (open) {
-            schedule[open] = intClass.name;
-            usedPeriods.add(open);
-            addEnroll(intClass.id, open);
-          }
-        }
-      }
-    }
-
-    // ── Step 3: Assign single-period-locked standard classes ──────────────
-    const singleLocked = gradeClasses
-      .filter(c => !c.isPeaks && singlePeriodClasses.has(c.id))
-      .sort((a, b) => (classPeriodMap[a.id]||[]).length - (classPeriodMap[b.id]||[]).length);
-
-    singleLocked.forEach(cls => {
-      const open = findOpenPeriod(cls, usedPeriods, classPeriodMap[cls.id]);
-      if (open) {
-        schedule[open] = cls.name;
-        usedPeriods.add(open);
-        addEnroll(cls.id, open);
-      }
+    const assignIntervention = (flag, isEla) => {
+      const intC = electives.find(e => isEla ? e.isElaIntervention : e.isMathIntervention);
+      if (!intC) return;
+      const intCap = parseInt(intC.maxSize) || 15;
+      const pref = pids[0];
+      if (!used.has(pref) && getE(intC.id, pref) < intCap) { schedule[pref] = intC.name; used.add(pref); addE(intC.id, pref); return; }
+      const avail = electivePMap[intC.id] || pids;
+      const open = avail.find(p => !used.has(p) && getE(intC.id, p) < intCap);
+      if (open) { schedule[open] = intC.name; used.add(open); addE(intC.id, open); }
+    };
+    if (desigs.includes("ELA Intervention")) assignIntervention(true, true);
+    if (desigs.includes("Math Intervention")) assignIntervention(false, false);
+    gradeClasses.filter(c => !c.isPeaks && singlePeriod.has(c.id)).sort((a, b) => (classPMap[a.id] || []).length - (classPMap[b.id] || []).length).forEach(cls => {
+      const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
+      if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); }
     });
-
-    // ── Step 4: Assign remaining standard classes (most constrained first) ─
-    const remaining = gradeClasses
-      .filter(c => !c.isPeaks && !singlePeriodClasses.has(c.id))
-      .sort((a, b) => (classPeriodMap[a.id]||periodIds).length - (classPeriodMap[b.id]||periodIds).length);
-
-    remaining.forEach(cls => {
-      const open = findOpenPeriod(cls, usedPeriods, classPeriodMap[cls.id]);
-      if (open) {
-        schedule[open] = cls.name;
-        usedPeriods.add(open);
-        addEnroll(cls.id, open);
-      }
+    gradeClasses.filter(c => !c.isPeaks && !singlePeriod.has(c.id)).sort((a, b) => (classPMap[a.id] || pids).length - (classPMap[b.id] || pids).length).forEach(cls => {
+      const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
+      if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); }
     });
-
-    // ── Step 5: Assign elective by ranked preference ───────────────────────
     const choices = getChoices(student);
     let electiveAssigned = null;
-
     for (const choice of choices) {
-      const elective = electives.find(e =>
-        e.name.toLowerCase() === choice.toLowerCase() &&
-        !e.isElaIntervention && !e.isMathIntervention
-      );
-      if (!elective) continue;
-      // Grade restriction check
-      if (elective.gradeRestriction && parseInt(elective.gradeRestriction) !== grade) continue;
-
-      const avail = electivePeriodMap[elective.id] || periodIds;
-      const open = avail.find(pid =>
-        !usedPeriods.has(pid) &&
-        getEnroll(elective.id, pid) < getCap(elective)
-      );
-      if (open) {
-        schedule[open] = `[E] ${elective.name}`;
-        electiveAssigned = elective.name;
-        usedPeriods.add(open);
-        addEnroll(elective.id, open);
-        break;
-      }
+      const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
+      if (!el) continue;
+      if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) continue;
+      const avail = electivePMap[el.id] || pids;
+      const open = avail.find(p => !used.has(p) && getE(el.id, p) < cap(el));
+      if (open) { schedule[open] = "[E] " + el.name; electiveAssigned = el.name; used.add(open); addE(el.id, open); break; }
     }
-
-    if (!electiveAssigned && choices.length > 0) {
-      conflicts.push({ student, reason: 'All elective choices exhausted or unavailable', choices });
-    } else if (!electiveAssigned) {
-      conflicts.push({ student, reason: 'No elective choices provided', choices: [] });
-    }
-
-    return { student, schedule, elective: electiveAssigned, conflicts: electiveAssigned ? [] : ['Elective unassigned'] };
+    if (!electiveAssigned) conflicts.push({ student, reason: choices.length ? "All elective choices exhausted or unavailable" : "No elective choices provided", choices });
+    return { student, schedule, elective: electiveAssigned, conflicts: electiveAssigned ? [] : ["unassigned"] };
   });
-
   return { assignments, conflicts };
 }
 
-// ─── EXPORT ──────────────────────────────────────────────────────────────────
 function exportToExcel(result, state, runName) {
   const { assignments } = result;
   const { periods } = state;
   const wb = XLSX.utils.book_new();
-
-  // ── Sheet 1: Master Schedule (periods as columns, classes as rows) ──────────
-  // Build unique class list across all periods
-  const classRows = {};
+  const allClasses = {};
   assignments.forEach(a => {
     Object.entries(a.schedule).forEach(([pid, cls]) => {
-      const cleanCls = cls.replace("[E] ", "");
-      if (!classRows[cleanCls]) classRows[cleanCls] = { "Class": cleanCls };
-      if (!classRows[cleanCls][pid]) classRows[cleanCls][pid] = [];
-      classRows[cleanCls][pid].push(a.student.student_name);
+      const clean = cls.replace("[E] ", "");
+      if (!allClasses[clean]) allClasses[clean] = {};
+      if (!allClasses[clean][pid]) allClasses[clean][pid] = [];
+      allClasses[clean][pid].push(a.student.student_name);
     });
   });
-
-  // Build header row: Class | Period 1 (8:30-9:38) | Period 2 ... | Total Students
-  const periodHeaders = periods.map(p => `${p.label}${p.startTime ? " ("+p.startTime+(p.endTime?"-"+p.endTime:"")+")" : ""}`);
-  const masterRows = Object.values(classRows).map(row => {
-    const out = { "Class": row["Class"] };
-    periods.forEach((p, i) => {
-      const students = row[p.id] || [];
-      out[periodHeaders[i]] = students.length > 0 ? students.join(", ") : "";
-    });
-    out["Total Students"] = periods.reduce((sum, p) => sum + (row[p.id] ? row[p.id].length : 0), 0);
-    return out;
+  const pCols = periods.map(p => p.label + (p.startTime ? " (" + p.startTime + (p.endTime ? "-" + p.endTime : "") + ")" : ""));
+  const masterRows = [["Class", ...pCols, "Total"]];
+  masterRows.push(["Scheduled Time", ...periods.map(p => p.startTime + (p.endTime ? " - " + p.endTime : "")), ""]);
+  Object.entries(allClasses).forEach(([cls, pd]) => {
+    const row = [cls];
+    periods.forEach(p => { const s = pd[p.id] || []; row.push(s.length ? s.length + " students" : ""); });
+    row.push(periods.reduce((sum, p) => sum + (pd[p.id] ? pd[p.id].length : 0), 0));
+    masterRows.push(row);
   });
-
-  // Add a summary row at top with period times
-  const timeRow = { "Class": "⏱ Time" };
-  periods.forEach((p, i) => { timeRow[periodHeaders[i]] = p.startTime + (p.endTime ? " – " + p.endTime : ""); });
-  timeRow["Total Students"] = "";
-
-  const ws1 = XLSX.utils.json_to_sheet([timeRow, ...masterRows]);
-  // Set column widths
-  ws1["!cols"] = [{ wch: 28 }, ...periods.map(() => ({ wch: 40 })), { wch: 14 }];
+  const ws1 = XLSX.utils.aoa_to_sheet(masterRows);
+  ws1["!cols"] = [{ wch: 28 }, ...periods.map(() => ({ wch: 16 })), { wch: 8 }];
   XLSX.utils.book_append_sheet(wb, ws1, "Master Schedule");
-
-  // ── Sheet 2: Class Rosters (one section per class) ──────────────────────────
-  const rosterRows = [];
-  Object.values(classRows).forEach(row => {
-    rosterRows.push({ "Class": `── ${row["Class"]} ──`, "Student Name": "", "Student ID": "", "Grade": "", "Period": "" });
-    periods.forEach(p => {
-      const students = row[p.id] || [];
-      students.forEach(name => {
-        const a = assignments.find(x => x.student.student_name === name);
-        rosterRows.push({
-          "Class": row["Class"],
-          "Student Name": name,
-          "Student ID": a?.student.student_id || "",
-          "Grade": a?.student.grade || "",
-          "Period": periods.find(x => x.id === p.id)?.label || p.id
-        });
-      });
-    });
-    rosterRows.push({ "Class": "", "Student Name": "", "Student ID": "", "Grade": "", "Period": "" });
+  const rosterRows = [["Class", ...pCols]];
+  Object.entries(allClasses).forEach(([cls, pd]) => {
+    const max = Math.max(...periods.map(p => (pd[p.id] || []).length), 0);
+    if (!max) return;
+    rosterRows.push([cls, ...periods.map(p => (pd[p.id] || []).length ? (pd[p.id].length + " enrolled") : "")]);
+    for (let i = 0; i < max; i++) { const row = [""]; periods.forEach(p => { row.push((pd[p.id] || [])[i] || ""); }); rosterRows.push(row); }
+    rosterRows.push(new Array(periods.length + 1).fill(""));
   });
-  const ws2 = XLSX.utils.json_to_sheet(rosterRows);
-  ws2["!cols"] = [{ wch: 28 }, { wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 14 }];
+  const ws2 = XLSX.utils.aoa_to_sheet(rosterRows);
+  ws2["!cols"] = [{ wch: 28 }, ...periods.map(() => ({ wch: 22 }))];
   XLSX.utils.book_append_sheet(wb, ws2, "Class Rosters");
-
-  // ── Sheet 3: Per-Student Schedule ───────────────────────────────────────────
   const headers = ["Student Name", "Student ID", "Grade", "Designation", ...periods.map(p => p.label), "Elective Assigned"];
   const rows = assignments.map(a => {
-    const row = {
-      "Student Name": a.student.student_name,
-      "Student ID": a.student.student_id,
-      "Grade": a.student.grade,
-      "Designation": a.student.designation || "",
-    };
-    periods.forEach(p => { row[p.label] = (a.schedule[p.id] || "—").replace("[E] ", ""); });
-    row["Elective Assigned"] = a.elective || "⚠ UNASSIGNED";
+    const row = { "Student Name": a.student.student_name, "Student ID": a.student.student_id, "Grade": a.student.grade, "Designation": a.student.designation || "" };
+    periods.forEach(p => { row[p.label] = (a.schedule[p.id] || "-").replace("[E] ", ""); });
+    row["Elective Assigned"] = a.elective || "UNASSIGNED";
     return row;
   });
   const ws3 = XLSX.utils.json_to_sheet(rows, { header: headers });
   ws3["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 20 }, ...periods.map(() => ({ wch: 20 })), { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, ws3, "Per-Student Schedule");
-
-  // ── Sheet 4: Conflicts ───────────────────────────────────────────────────────
-  if (result.conflicts.length > 0) {
-    const conflictData = result.conflicts.map(c => ({
-      "Student Name": c.student.student_name,
-      "Student ID": c.student.student_id,
-      "Grade": c.student.grade,
-      "Designation": c.student.designation || "",
-      "Issue": c.reason,
-      "Choices Submitted": c.choices ? c.choices.join(", ") : ""
-    }));
-    const ws4 = XLSX.utils.json_to_sheet(conflictData);
+  if (result.conflicts && result.conflicts.length > 0) {
+    const cd = result.conflicts.map(c => ({ "Student Name": c.student.student_name, "Student ID": c.student.student_id, "Grade": c.student.grade, "Designation": c.student.designation || "", "Issue": c.reason, "Choices": c.choices ? c.choices.join(", ") : "" }));
+    const ws4 = XLSX.utils.json_to_sheet(cd);
     ws4["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 20 }, { wch: 36 }, { wch: 60 }];
     XLSX.utils.book_append_sheet(wb, ws4, "Conflicts");
   }
-
-  XLSX.writeFile(wb, `${runName}.xlsx`);
+  XLSX.writeFile(wb, runName + ".xlsx");
 }
 
-// ─── COMPONENTS ──────────────────────────────────────────────────────────────
-
-function UpdateBanner({ onDismiss }) {
-  return (
-    <div className="update-banner">
-      <span>⚡ A new version is available</span>
-      <button onClick={() => window.location.href = APP_URL + "?v=" + Date.now()}>Update Now</button>
-      <button onClick={onDismiss} style={{background:'transparent',color:'#1a1a00',border:'none',cursor:'pointer',fontSize:14}}>✕</button>
-    </div>
-  );
-}
-
-// ─── SETUP PAGE ──────────────────────────────────────────────────────────────
 function SetupPage({ state, setState }) {
-  const { schoolName, numPeriods, periods } = state;
-
-  const updateField = (field, val) => setState(s => ({ ...s, [field]: val }));
-
-  const syncPeriods = (n) => {
-    const count = parseInt(n) || 1;
-    const current = periods || [];
+  const { schoolName = "", lunchStart = "", lunchEnd = "", numPeriods = 6, periods = [] } = state;
+  const upd = (f, v) => setState(s => ({ ...s, [f]: v }));
+  const syncPeriods = n => {
+    const count = Math.max(1, Math.min(12, parseInt(n) || 1));
+    const cur = periods || [];
     const updated = [];
-    for (let i = 0; i < count; i++) {
-      updated.push(current[i] || { id: `p${i+1}`, label: `${i+1}${getOrdinal(i+1)} Period`, startTime: "", endTime: "" });
-    }
+    for (let i = 0; i < count; i++) updated.push(cur[i] || { id: "p" + (i + 1), label: "Period " + (i + 1), startTime: "", endTime: "" });
     setState(s => ({ ...s, numPeriods: count, periods: updated }));
   };
-
-  const getOrdinal = (n) => {
-    const s = ["th","st","nd","rd"], v = n % 100;
-    return (s[(v-20)%10] || s[v] || s[0]);
-  };
-
-  const updatePeriod = (idx, field, val) => {
-    const updated = [...periods];
-    updated[idx] = { ...updated[idx], [field]: val };
-    setState(s => ({ ...s, periods: updated }));
-  };
-
+  const updPeriod = (i, f, v) => { const u = [...periods]; u[i] = { ...u[i], [f]: v }; setState(s => ({ ...s, periods: u })); };
   return (
-    <div>
-      <div className="page-header">
-        <div className="page-title">School Setup</div>
-        <div className="page-sub">Configure your school's basic information and periods</div>
-      </div>
-
-      <div className="card">
-        <div className="card-title">School Info</div>
-        <div className="grid-2">
-          <div>
-            <label>School Name</label>
-            <input value={schoolName} onChange={e => updateField("schoolName", e.target.value)} placeholder="e.g. Galileo Gifted School for Learning" />
-          </div>
-          <div>
-            <label>Number of Periods</label>
-            <input type="number" min="1" max="12" value={numPeriods} onChange={e => syncPeriods(e.target.value)} />
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-title">Period Schedule</div>
-        <div style={{display:'grid', gridTemplateColumns:'44px 1fr 140px 140px', gap:'10px', padding:'6px 0 10px', borderBottom:'1px solid var(--border)'}}>
-          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>#</span>
-          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Label</span>
-          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>Start Time</span>
-          <span style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em'}}>End Time</span>
-        </div>
-        {(periods || []).length === 0 && (
-          <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>
-            Set the number of periods above to configure your schedule
-          </div>
-        )}
-        {(periods || []).map((p, i) => (
-          <div key={p.id} style={{display:'grid', gridTemplateColumns:'44px 1fr 140px 140px', gap:'10px', alignItems:'center', padding:'8px 0', borderBottom:'1px solid var(--border)'}}>
-            <span className="tag tag-gray" style={{width:28,textAlign:'center',display:'inline-block'}}>{i+1}</span>
-            <input value={p.label} onChange={e => updatePeriod(i, 'label', e.target.value)} placeholder={`Period ${i+1}`} />
-            <input type="text" value={p.startTime} onChange={e => updatePeriod(i, 'startTime', e.target.value)} placeholder="e.g. 8:30 AM" />
-            <input type="text" value={p.endTime} onChange={e => updatePeriod(i, 'endTime', e.target.value)} placeholder="e.g. 9:38 AM" />
-          </div>
-        ))}
-      </div>
-    </div>
+    React.createElement("div", null,
+      React.createElement("div", { className: "page-header" },
+        React.createElement("div", { className: "page-title" }, "School Setup"),
+        React.createElement("div", { className: "page-sub" }, "Configure your school's basic information and periods")
+      ),
+      React.createElement("div", { className: "card" },
+        React.createElement("div", { className: "card-title" }, "School Info"),
+        React.createElement("div", { className: "grid2" },
+          React.createElement("div", null, React.createElement("label", null, "School Name"), React.createElement("input", { value: schoolName, onChange: e => upd("schoolName", e.target.value), placeholder: "e.g. Galileo Gifted School for Learning" })),
+          React.createElement("div", null, React.createElement("label", null, "Number of Periods"), React.createElement("input", { type: "number", min: "1", max: "12", value: numPeriods, onChange: e => syncPeriods(e.target.value) }))
+        ),
+        React.createElement("hr", { className: "divider" }),
+        React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 10 } },
+          React.createElement("strong", null, "Lunch"), " ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")
+        ),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "140px 140px", gap: 10 } },
+          React.createElement("div", null, React.createElement("label", null, "Lunch Start"), React.createElement("input", { type: "text", value: lunchStart, onChange: e => upd("lunchStart", e.target.value), placeholder: "e.g. 11:56 AM" })),
+          React.createElement("div", null, React.createElement("label", null, "Lunch End"), React.createElement("input", { type: "text", value: lunchEnd, onChange: e => upd("lunchEnd", e.target.value), placeholder: "e.g. 12:30 PM" }))
+        )
+      ),
+      React.createElement("div", { className: "card" },
+        React.createElement("div", { className: "card-title" }, "Period Schedule"),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "44px 1fr 140px 140px", gap: 10, paddingBottom: 10, borderBottom: "1px solid var(--border)" } },
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase" } }, "#"),
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase" } }, "Label"),
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase" } }, "Start Time"),
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase" } }, "End Time")
+        ),
+        periods.length === 0 && React.createElement("div", { style: { color: "var(--text3)", fontSize: 12, padding: "20px 0", textAlign: "center" } }, "Set number of periods above"),
+        periods.map((p, i) =>
+          React.createElement("div", { key: p.id, style: { display: "grid", gridTemplateColumns: "44px 1fr 140px 140px", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" } },
+            React.createElement("span", { className: "tag tag-gray", style: { textAlign: "center" } }, i + 1),
+            React.createElement("input", { value: p.label, onChange: e => updPeriod(i, "label", e.target.value), placeholder: "Period " + (i + 1) }),
+            React.createElement("input", { type: "text", value: p.startTime, onChange: e => updPeriod(i, "startTime", e.target.value), placeholder: "e.g. 8:30 AM" }),
+            React.createElement("input", { type: "text", value: p.endTime, onChange: e => updPeriod(i, "endTime", e.target.value), placeholder: "e.g. 9:38 AM" })
+          )
+        )
+      )
+    )
   );
 }
 
-// ─── CLASSES PAGE ─────────────────────────────────────────────────────────────
 function ClassesPage({ state, setState }) {
   const { classes = [], electives = [], periods = [] } = state;
   const [tab, setTab] = useState("standard");
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
-
-  const periodOptions = periods.map(p => ({ id: p.id, label: p.label }));
-
-  const openAdd = () => {
-    setEditing(null);
-    setForm(tab === "standard"
-      ? { name: "", gradeLevel: "all", isPeaks: false, periods: [] }
-      : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }
-    );
-    setShowModal(true);
-  };
-
-  const openEdit = (item) => {
+  const pids = periods.map(p => p.id);
+  const openAdd = () => { setEditing(null); setForm(tab === "standard" ? { name: "", gradeLevel: "all", isPeaks: false, periods: [] } : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }); setShowModal(true); };
+  const openEdit = item => {
     setEditing(item.id);
-    if (tab === "standard") {
-      setForm({ ...item, periods: (item.periods || "").split(",").map(p=>p.trim()).filter(Boolean) });
-    } else {
-      setForm({ ...item, availablePeriods: (item.availablePeriods || "").split(",").map(p=>p.trim()).filter(Boolean) });
-    }
+    if (tab === "standard") setForm({ ...item, periods: (item.periods || "").split(",").map(x => x.trim()).filter(Boolean) });
+    else setForm({ ...item, availablePeriods: (item.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean) });
     setShowModal(true);
   };
-
   const save = () => {
     if (tab === "standard") {
-      const item = { ...form, id: editing || `cls_${Date.now()}`, periods: (form.periods || []).join(",") };
-      setState(s => ({
-        ...s,
-        classes: editing ? s.classes.map(c => c.id === editing ? item : c) : [...s.classes, item]
-      }));
+      const item = { ...form, id: editing || "cls_" + Date.now(), periods: (form.periods || []).join(",") };
+      setState(s => ({ ...s, classes: editing ? s.classes.map(c => c.id === editing ? item : c) : [...s.classes, item] }));
     } else {
-      const item = { ...form, id: editing || `elec_${Date.now()}`, availablePeriods: (form.availablePeriods || []).join(",") };
-      setState(s => ({
-        ...s,
-        electives: editing ? s.electives.map(e => e.id === editing ? item : e) : [...s.electives, item]
-      }));
+      const item = { ...form, id: editing || "elec_" + Date.now(), availablePeriods: (form.availablePeriods || []).join(",") };
+      setState(s => ({ ...s, electives: editing ? s.electives.map(e => e.id === editing ? item : e) : [...s.electives, item] }));
     }
     setShowModal(false);
   };
-
-  const remove = (id) => {
-    if (tab === "standard") setState(s => ({ ...s, classes: s.classes.filter(c => c.id !== id) }));
-    else setState(s => ({ ...s, electives: s.electives.filter(e => e.id !== id) }));
-  };
-
-  const togglePeriod = (pid) => {
+  const remove = id => { if (tab === "standard") setState(s => ({ ...s, classes: s.classes.filter(c => c.id !== id) })); else setState(s => ({ ...s, electives: s.electives.filter(e => e.id !== id) })); };
+  const toggleP = pid => {
     const key = tab === "standard" ? "periods" : "availablePeriods";
-    const current = form[key] || [];
-    setForm(f => ({ ...f, [key]: current.includes(pid) ? current.filter(p => p !== pid) : [...current, pid] }));
+    const cur = form[key] || [];
+    setForm(f => ({ ...f, [key]: cur.includes(pid) ? cur.filter(p => p !== pid) : [...cur, pid] }));
   };
-
+  const clearPeriods = () => { const key = tab === "standard" ? "periods" : "availablePeriods"; setForm(f => ({ ...f, [key]: [] })); };
+  const curPeriods = (tab === "standard" ? form.periods : form.availablePeriods) || [];
+  const list = tab === "standard" ? classes : electives;
   return (
-    <div>
-      <div className="page-header">
-        <div className="flex-between">
-          <div>
-            <div className="page-title">Classes</div>
-            <div className="page-sub">Configure standard classes and electives</div>
-          </div>
-          <button className="btn btn-primary" onClick={openAdd}>+ Add {tab === "standard" ? "Class" : "Elective"}</button>
-        </div>
-      </div>
-
-      <div className="flex-gap mb-16">
-        <button className={`btn ${tab==="standard"?"btn-primary":"btn-ghost"}`} onClick={() => setTab("standard")}>Standard Classes ({classes.length})</button>
-        <button className={`btn ${tab==="elective"?"btn-primary":"btn-ghost"}`} onClick={() => setTab("elective")}>Electives ({electives.length})</button>
-      </div>
-
-      {tab === "standard" && (
-        <div className="card">
-          {classes.length === 0 ? (
-            <div className="empty">
-              <div className="empty-icon">📚</div>
-              <div className="empty-title">No standard classes yet</div>
-              <div className="empty-sub">Add core classes that are automatically assigned to students</div>
-            </div>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr>
-                  <th>Class Name</th><th>Grade Level</th><th>Type</th><th>Periods</th><th>Max Size</th><th></th>
-                </tr></thead>
-                <tbody>
-                  {classes.map(c => (
-                    <tr key={c.id}>
-                      <td style={{color:'var(--text)'}}>{c.name}</td>
-                      <td>{c.gradeLevel === "all" ? <span className="tag tag-gray">All</span> : <span className="tag tag-blue">{c.gradeLevel}th Grade</span>}</td>
-                      <td>{c.isPeaks ? <span className="tag tag-yellow">PEAKS Block</span> : <span className="tag tag-gray">Standard</span>}</td>
-                      <td style={{fontSize:11}}>{(c.periods||"").split(",").filter(Boolean).map(pid => {
-                        const p = periods.find(x => x.id === pid);
-                        return p ? <span key={pid} className="tag tag-gray" style={{marginRight:2}}>{p.label}</span> : null;
-                      })}</td>
-                      <td>{c.maxSize || "25"}</td>
-                      <td>
-                        <div className="flex-gap">
-                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(c)}>Edit</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => remove(c.id)}>Remove</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === "elective" && (
-        <div className="card">
-          {electives.length === 0 ? (
-            <div className="empty">
-              <div className="empty-icon">🎨</div>
-              <div className="empty-title">No electives yet</div>
-              <div className="empty-sub">Add elective courses students will rank by preference</div>
-            </div>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr>
-                  <th>Elective Name</th><th>Type</th><th>Max Size</th><th>Grade Restriction</th><th>Available Periods</th><th></th>
-                </tr></thead>
-                <tbody>
-                  {electives.map(e => (
-                    <tr key={e.id}>
-                      <td style={{color:'var(--text)'}}>{e.name}</td>
-                      <td>
-                        {e.isElaIntervention || e.isMathIntervention
-                          ? <span className="tag tag-red">Intervention</span>
-                          : e.isYearLong ? <span className="tag tag-green">Year-Long</span> : <span className="tag tag-blue">Semester</span>}
-                      </td>
-                      <td>{e.maxSize || "25"}</td>
-                      <td>{e.gradeRestriction ? <span className="tag tag-yellow">{e.gradeRestriction}th Only</span> : <span className="tag tag-gray">All</span>}</td>
-                      <td style={{fontSize:11}}>{(e.availablePeriods||"").split(",").filter(Boolean).map(pid => {
-                        const p = periods.find(x => x.id === pid);
-                        return p ? <span key={pid} className="tag tag-gray" style={{marginRight:2}}>{p.label}</span> : null;
-                      })}</td>
-                      <td>
-                        <div className="flex-gap">
-                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(e)}>Edit</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => remove(e.id)}>Remove</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {showModal && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
-          <div className="modal">
-            <div className="modal-title">{editing ? "Edit" : "Add"} {tab === "standard" ? "Standard Class" : "Elective"}</div>
-
-            <div className="flex-col">
-              <div>
-                <label>Name</label>
-                <input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder={tab === "standard" ? "e.g. 6th Grade Math" : "e.g. Photography"} />
-              </div>
-
-              {tab === "standard" && (
-                <>
-                  <div>
-                    <label>Grade Level</label>
-                    <select value={form.gradeLevel || "all"} onChange={e => setForm(f => ({ ...f, gradeLevel: e.target.value }))}>
-                      <option value="all">All Grades</option>
-                      <option value="6">6th Grade</option>
-                      <option value="7">7th Grade</option>
-                      <option value="8">8th Grade</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{marginBottom:8}}>PEAKS Block (2 consecutive periods)</label>
-                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
-                      <input type="checkbox" checked={form.isPeaks||false} onChange={e => setForm(f=>({...f,isPeaks:e.target.checked}))} style={{width:'auto'}} />
-                      <span style={{fontSize:12}}>This is a PEAKS block</span>
-                    </label>
-                  </div>
-                </>
-              )}
-
-              {tab === "elective" && (
-                <>
-                  <div className="grid-2">
-                    <div>
-                      <label>Max Class Size</label>
-                      <input type="number" value={form.maxSize || "25"} onChange={e => setForm(f => ({ ...f, maxSize: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label>Grade Restriction (optional)</label>
-                      <select value={form.gradeRestriction || ""} onChange={e => setForm(f => ({ ...f, gradeRestriction: e.target.value }))}>
-                        <option value="">All Grades</option>
-                        <option value="6">6th Grade Only</option>
-                        <option value="7">7th Grade Only</option>
-                        <option value="8">8th Grade Only</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex-gap">
-                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
-                      <input type="checkbox" checked={form.isYearLong||false} onChange={e => setForm(f=>({...f,isYearLong:e.target.checked}))} style={{width:'auto'}} />
-                      <span style={{fontSize:12}}>Year-long</span>
-                    </label>
-                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
-                      <input type="checkbox" checked={form.isElaIntervention||false} onChange={e => setForm(f=>({...f,isElaIntervention:e.target.checked}))} style={{width:'auto'}} />
-                      <span style={{fontSize:12}}>ELA Intervention</span>
-                    </label>
-                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginBottom:0}}>
-                      <input type="checkbox" checked={form.isMathIntervention||false} onChange={e => setForm(f=>({...f,isMathIntervention:e.target.checked}))} style={{width:'auto'}} />
-                      <span style={{fontSize:12}}>Math Intervention</span>
-                    </label>
-                  </div>
-                </>
-              )}
-
-              <div>
-                <label style={{marginBottom:8}}>Period Hints <span style={{color:'var(--text3)',fontWeight:'normal'}}>(optional — engine auto-assigns if blank)</span></label>
-                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                  {periodOptions.map(p => {
-                    const key = tab === "standard" ? "periods" : "availablePeriods";
-                    const selected = (form[key] || []).includes(p.id);
-                    return (
-                      <button key={p.id} className={`btn btn-sm ${selected ? "btn-primary" : "btn-ghost"}`} onClick={() => togglePeriod(p.id)}>
-                        {p.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={save} disabled={!form.name}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    React.createElement("div", null,
+      React.createElement("div", { className: "page-header" },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Classes"), React.createElement("div", { className: "page-sub" }, "Configure standard classes and electives")),
+          React.createElement("button", { className: "btn btn-primary", onClick: openAdd }, "+ Add " + (tab === "standard" ? "Class" : "Elective"))
+        )
+      ),
+      React.createElement("div", { className: "flex", style: { marginBottom: 16 } },
+        React.createElement("button", { className: "btn " + (tab === "standard" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("standard") }, "Standard (" + classes.length + ")"),
+        React.createElement("button", { className: "btn " + (tab === "elective" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("elective") }, "Electives (" + electives.length + ")")
+      ),
+      React.createElement("div", { className: "card" },
+        list.length === 0 ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "Nothing yet"), React.createElement("div", { className: "empty-sub" }, "Click Add to get started")) :
+        React.createElement("div", { style: { overflowX: "auto" } },
+          React.createElement("table", null,
+            React.createElement("thead", null, React.createElement("tr", null,
+              React.createElement("th", null, "Name"),
+              tab === "standard" ? React.createElement("th", null, "Grade") : React.createElement("th", null, "Type"),
+              tab === "standard" ? React.createElement("th", null, "Flags") : React.createElement("th", null, "Cap"),
+              React.createElement("th", null, "Periods"),
+              React.createElement("th", null)
+            )),
+            React.createElement("tbody", null,
+              list.map(item =>
+                React.createElement("tr", { key: item.id },
+                  React.createElement("td", { style: { color: "var(--text)" } }, item.name),
+                  tab === "standard"
+                    ? React.createElement("td", null, item.gradeLevel === "all" ? React.createElement("span", { className: "tag tag-gray" }, "All") : React.createElement("span", { className: "tag tag-blue" }, item.gradeLevel + "th"))
+                    : React.createElement("td", null, item.isElaIntervention || item.isMathIntervention ? React.createElement("span", { className: "tag tag-red" }, "Intervention") : item.isYearLong ? React.createElement("span", { className: "tag tag-green" }, "Year-Long") : React.createElement("span", { className: "tag tag-blue" }, "Semester")),
+                  tab === "standard"
+                    ? React.createElement("td", null, item.isPeaks && React.createElement("span", { className: "tag tag-yellow" }, "PEAKS"))
+                    : React.createElement("td", null, item.maxSize || "25"),
+                  React.createElement("td", { style: { fontSize: 11 } },
+                    (tab === "standard" ? (item.periods || "") : (item.availablePeriods || "")).split(",").filter(Boolean).map(pid => {
+                      const p = periods.find(x => x.id === pid);
+                      return p ? React.createElement("span", { key: pid, className: "tag tag-gray" }, p.label) : null;
+                    })
+                  ),
+                  React.createElement("td", null,
+                    React.createElement("div", { className: "flex" },
+                      React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => openEdit(item) }, "Edit"),
+                      React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => remove(item.id) }, "Remove")
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      ),
+      showModal && React.createElement("div", { className: "modal-overlay", onClick: e => e.target === e.currentTarget && setShowModal(false) },
+        React.createElement("div", { className: "modal" },
+          React.createElement("div", { className: "modal-title" }, (editing ? "Edit " : "Add ") + (tab === "standard" ? "Standard Class" : "Elective")),
+          React.createElement("div", { className: "flex-col" },
+            React.createElement("div", null, React.createElement("label", null, "Name"), React.createElement("input", { value: form.name || "", onChange: e => setForm(f => ({ ...f, name: e.target.value })), placeholder: tab === "standard" ? "e.g. 6th Grade Math" : "e.g. Photography" })),
+            tab === "standard" && React.createElement("div", null,
+              React.createElement("label", null, "Grade Level"),
+              React.createElement("select", { value: form.gradeLevel || "all", onChange: e => setForm(f => ({ ...f, gradeLevel: e.target.value })) },
+                React.createElement("option", { value: "all" }, "All Grades"),
+                React.createElement("option", { value: "6" }, "6th Grade"),
+                React.createElement("option", { value: "7" }, "7th Grade"),
+                React.createElement("option", { value: "8" }, "8th Grade")
+              )
+            ),
+            tab === "standard" && React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0 } },
+              React.createElement("input", { type: "checkbox", checked: form.isPeaks || false, onChange: e => setForm(f => ({ ...f, isPeaks: e.target.checked })), style: { width: "auto" } }),
+              React.createElement("span", null, "PEAKS block (2 consecutive periods)")
+            ),
+            tab === "elective" && React.createElement("div", { className: "grid2" },
+              React.createElement("div", null, React.createElement("label", null, "Max Class Size"), React.createElement("input", { type: "number", value: form.maxSize || "25", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })) })),
+              React.createElement("div", null,
+                React.createElement("label", null, "Grade Restriction"),
+                React.createElement("select", { value: form.gradeRestriction || "", onChange: e => setForm(f => ({ ...f, gradeRestriction: e.target.value })) },
+                  React.createElement("option", { value: "" }, "All Grades"),
+                  React.createElement("option", { value: "6" }, "6th Only"),
+                  React.createElement("option", { value: "7" }, "7th Only"),
+                  React.createElement("option", { value: "8" }, "8th Only")
+                )
+              )
+            ),
+            tab === "elective" && React.createElement("div", { className: "flex", style: { flexWrap: "wrap" } },
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0, marginRight: 16 } }, React.createElement("input", { type: "checkbox", checked: form.isYearLong || false, onChange: e => setForm(f => ({ ...f, isYearLong: e.target.checked })), style: { width: "auto" } }), "Year-long"),
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0, marginRight: 16 } }, React.createElement("input", { type: "checkbox", checked: form.isElaIntervention || false, onChange: e => setForm(f => ({ ...f, isElaIntervention: e.target.checked })), style: { width: "auto" } }), "ELA Intervention"),
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0 } }, React.createElement("input", { type: "checkbox", checked: form.isMathIntervention || false, onChange: e => setForm(f => ({ ...f, isMathIntervention: e.target.checked })), style: { width: "auto" } }), "Math Intervention")
+            ),
+            React.createElement("div", null,
+              React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
+                React.createElement("label", { style: { marginBottom: 0 } }, "Period Hints ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
+                curPeriods.length > 0 && React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: clearPeriods }, "Clear Periods")
+              ),
+              React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+                periods.map(p => {
+                  const selected = curPeriods.includes(p.id);
+                  return React.createElement("button", { key: p.id, className: "btn btn-sm " + (selected ? "btn-primary" : "btn-ghost"), onClick: () => toggleP(p.id) }, p.label);
+                })
+              )
+            )
+          ),
+          React.createElement("div", { className: "modal-actions" },
+            React.createElement("button", { className: "btn btn-ghost", onClick: () => setShowModal(false) }, "Cancel"),
+            React.createElement("button", { className: "btn btn-primary", onClick: save, disabled: !form.name }, "Save")
+          )
+        )
+      )
+    )
   );
 }
 
-// ─── STUDENTS PAGE ────────────────────────────────────────────────────────────
 function StudentsPage({ state, setState }) {
   const { students = [] } = state;
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef();
-
-  const processCSV = (file) => {
+  const process = file => {
     setError("");
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const required = ["student_name", "student_id", "grade"];
-        const headers = results.meta.fields || [];
-        const missing = required.filter(r => !headers.includes(r));
-        if (missing.length > 0) {
-          setError(`Missing required columns: ${missing.join(", ")}`);
-          return;
-        }
-        setState(s => ({ ...s, students: results.data }));
-      },
-      error: (err) => setError(err.message)
-    });
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: res => {
+      const required = ["student_name", "student_id", "grade"];
+      const missing = required.filter(r => !(res.meta.fields || []).includes(r));
+      if (missing.length) { setError("Missing columns: " + missing.join(", ")); return; }
+      setState(s => ({ ...s, students: res.data }));
+    }, error: err => setError(err.message) });
   };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) processCSV(file);
-  };
-
-  const designationCounts = {};
-  students.forEach(s => {
-    (s.designation || "").split("|").forEach(d => {
-      d = d.trim();
-      if (d) designationCounts[d] = (designationCounts[d] || 0) + 1;
-    });
-  });
-
+  const desigCounts = {};
+  students.forEach(s => { (s.designation || "").split("|").forEach(d => { d = d.trim(); if (d) desigCounts[d] = (desigCounts[d] || 0) + 1; }); });
   return (
-    <div>
-      <div className="page-header">
-        <div className="flex-between">
-          <div>
-            <div className="page-title">Students</div>
-            <div className="page-sub">Upload student preference data via CSV</div>
-          </div>
-          {students.length > 0 && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setState(s => ({ ...s, students: [] }))}>Clear Students</button>
-          )}
-        </div>
-      </div>
-
-      {students.length === 0 ? (
-        <>
-          {error && <div className="alert alert-error">⚠ {error}</div>}
-          <div
-            className={`upload-zone ${dragOver ? "dragover" : ""}`}
-            onDrop={handleDrop}
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onClick={() => fileRef.current.click()}
-          >
-            <div className="upload-icon">📂</div>
-            <div className="upload-label">Drop your student CSV here or click to browse</div>
-            <div className="upload-sub">Required columns: student_name, student_id, grade — Optional: designation, choice_1 through choice_12</div>
-          </div>
-          <input ref={fileRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => e.target.files[0] && processCSV(e.target.files[0])} />
-
-          <div className="card" style={{marginTop:16}}>
-            <div className="card-title">Expected CSV Format</div>
-            <div style={{overflow:'auto',background:'var(--surface2)',padding:'12px',borderRadius:6,fontSize:11,color:'var(--accent)',fontFamily:'var(--mono)'}}>
-              student_name,student_id,grade,designation,choice_1,choice_2,...,choice_12<br/>
-              Jane Smith,10001,6,,Photography,PE,Art,...<br/>
-              John Doe,10002,7,ELA Intervention,PE,TV Production,...<br/>
-              Mary Lee,10003,8,Accelerated|ESE,Band 1,Yearbook,...
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="stat-grid">
-            <div className="stat-card">
-              <div className="stat-label">Total Students</div>
-              <div className="stat-value">{students.length}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">6th Grade</div>
-              <div className="stat-value">{students.filter(s => s.grade == 6).length}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">7th Grade</div>
-              <div className="stat-value">{students.filter(s => s.grade == 7).length}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">8th Grade</div>
-              <div className="stat-value">{students.filter(s => s.grade == 8).length}</div>
-            </div>
-          </div>
-
-          {Object.keys(designationCounts).length > 0 && (
-            <div className="card">
-              <div className="card-title">Student Designations</div>
-              <div className="flex-gap" style={{flexWrap:'wrap'}}>
-                {Object.entries(designationCounts).map(([d, count]) => (
-                  <span key={d} className="tag tag-yellow">{d}: {count}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="card">
-            <div className="card-title">Student List</div>
-            <div className="table-wrap" style={{maxHeight:400,overflowY:'auto'}}>
-              <table>
-                <thead><tr>
-                  <th>Name</th><th>ID</th><th>Grade</th><th>Designation</th><th>Top Choices</th>
-                </tr></thead>
-                <tbody>
-                  {students.slice(0, 100).map((s, i) => (
-                    <tr key={i}>
-                      <td style={{color:'var(--text)'}}>{s.student_name}</td>
-                      <td>{s.student_id}</td>
-                      <td><span className="tag tag-blue">{s.grade}th</span></td>
-                      <td>
-                        {(s.designation||"").split("|").filter(Boolean).map(d => (
-                          <span key={d} className="tag tag-yellow" style={{marginRight:2}}>{d}</span>
-                        ))}
-                      </td>
-                      <td style={{fontSize:11,color:'var(--text3)'}}>
-                        {[s.choice_1,s.choice_2,s.choice_3].filter(Boolean).join(" → ")}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {students.length > 100 && <div style={{textAlign:'center',padding:12,color:'var(--text3)',fontSize:11}}>Showing 100 of {students.length} students</div>}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+    React.createElement("div", null,
+      React.createElement("div", { className: "page-header" },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Students"), React.createElement("div", { className: "page-sub" }, "Upload student preference data")),
+          students.length > 0 && React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => setState(s => ({ ...s, students: [] })) }, "Clear")
+        )
+      ),
+      students.length === 0 ? React.createElement("div", null,
+        error && React.createElement("div", { className: "alert alert-error" }, error),
+        React.createElement("div", { className: "upload-zone " + (dragOver ? "dragover" : ""), onDrop: e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files[0]) process(e.dataTransfer.files[0]); }, onDragOver: e => { e.preventDefault(); setDragOver(true); }, onDragLeave: () => setDragOver(false), onClick: () => fileRef.current.click() },
+          React.createElement("div", { style: { fontSize: 32, marginBottom: 10 } }, ""),
+          React.createElement("div", { style: { color: "var(--text2)", marginBottom: 4 } }, "Drop CSV here or click to browse"),
+          React.createElement("div", { style: { color: "var(--text3)", fontSize: 11 } }, "Required: student_name, student_id, grade | Optional: designation, choice_1 to choice_12")
+        ),
+        React.createElement("input", { ref: fileRef, type: "file", accept: ".csv", style: { display: "none" }, onChange: e => e.target.files[0] && process(e.target.files[0]) }),
+        React.createElement("div", { className: "card", style: { marginTop: 16 } },
+          React.createElement("div", { className: "card-title" }, "Expected Format"),
+          React.createElement("div", { style: { background: "var(--surface2)", padding: 12, borderRadius: 6, fontSize: 11, color: "var(--accent)", fontFamily: "var(--mono)" } },
+            "student_name,student_id,grade,designation,choice_1,...,choice_12", React.createElement("br", null),
+            "Jane Smith,10001,6,,Photography,PE,Art,...", React.createElement("br", null),
+            "John Doe,10002,7,ELA Intervention,PE,TV Production,...", React.createElement("br", null),
+            "Mary Lee,10003,8,Accelerated|ESE,Band 1,Yearbook,..."
+          )
+        )
+      ) : React.createElement("div", null,
+        React.createElement("div", { className: "stats" },
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Total"), React.createElement("div", { className: "stat-value" }, students.length)),
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "6th Grade"), React.createElement("div", { className: "stat-value" }, students.filter(s => s.grade == 6).length)),
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "7th Grade"), React.createElement("div", { className: "stat-value" }, students.filter(s => s.grade == 7).length)),
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "8th Grade"), React.createElement("div", { className: "stat-value" }, students.filter(s => s.grade == 8).length))
+        ),
+        Object.keys(desigCounts).length > 0 && React.createElement("div", { className: "card" },
+          React.createElement("div", { className: "card-title" }, "Designations"),
+          React.createElement("div", { className: "flex", style: { flexWrap: "wrap" } }, Object.entries(desigCounts).map(([d, n]) => React.createElement("span", { key: d, className: "tag tag-yellow" }, d + ": " + n)))
+        ),
+        React.createElement("div", { className: "card" },
+          React.createElement("div", { className: "card-title" }, "Student List"),
+          React.createElement("div", { style: { maxHeight: 400, overflowY: "auto" } },
+            React.createElement("table", null,
+              React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Name"), React.createElement("th", null, "ID"), React.createElement("th", null, "Grade"), React.createElement("th", null, "Designation"), React.createElement("th", null, "Top Choices"))),
+              React.createElement("tbody", null,
+                students.slice(0, 100).map((s, i) =>
+                  React.createElement("tr", { key: i },
+                    React.createElement("td", { style: { color: "var(--text)" } }, s.student_name),
+                    React.createElement("td", null, s.student_id),
+                    React.createElement("td", null, React.createElement("span", { className: "tag tag-blue" }, s.grade + "th")),
+                    React.createElement("td", null, (s.designation || "").split("|").filter(Boolean).map(d => React.createElement("span", { key: d, className: "tag tag-yellow" }, d))),
+                    React.createElement("td", { style: { fontSize: 11, color: "var(--text3)" } }, [s.choice_1, s.choice_2, s.choice_3].filter(Boolean).join(" > "))
+                  )
+                )
+              )
+            ),
+            students.length > 100 && React.createElement("div", { style: { textAlign: "center", padding: 12, color: "var(--text3)", fontSize: 11 } }, "Showing 100 of " + students.length)
+          )
+        )
+      )
+    )
   );
 }
 
-// ─── SCHEDULE PAGE ────────────────────────────────────────────────────────────
 function SchedulePage({ state, setState }) {
-  const { students = [], periods = [], classes = [], electives = [], runs = [] } = state;
+  const { students = [], periods = [], runs = [] } = state;
   const [running, setRunning] = useState(false);
-  const [lastResult, setLastResult] = useState(null);
-  const [runName, setRunName] = useState(() => `Schedule_Run_${new Date().toLocaleDateString("en-US").replace(/\//g,"_")}`);
-
+  const [lastRun, setLastRun] = useState(null);
+  const [runName, setRunName] = useState("Schedule_Run_" + new Date().toLocaleDateString("en-US").replace(/\//g, "_"));
   const canRun = students.length > 0 && periods.length > 0;
-
-  const run = () => {
+  const doRun = () => {
     setRunning(true);
     setTimeout(() => {
       const result = runScheduler(state);
-      const run = {
-        id: `run_${Date.now()}`,
-        name: runName,
-        date: new Date().toLocaleString(),
-        totalStudents: students.length,
-        conflicts: result.conflicts.length,
-        assigned: students.length - result.conflicts.length,
-        result
-      };
-      setState(s => ({ ...s, runs: [run, ...s.runs] }));
-      setLastResult(run);
+      const r = { id: "run_" + Date.now(), name: runName, date: new Date().toLocaleString(), totalStudents: students.length, conflicts: result.conflicts.length, assigned: students.length - result.conflicts.length, result };
+      setState(s => ({ ...s, runs: [r, ...s.runs] }));
+      setLastRun(r);
       setRunning(false);
-      setRunName(`Schedule_Run_${new Date().toLocaleDateString("en-US").replace(/\//g,"_")}_v${(runs.length+2)}`);
     }, 800);
   };
-
+  const del = id => setState(s => ({ ...s, runs: s.runs.filter(r => r.id !== id) }));
   return (
-    <div>
-      <div className="page-header">
-        <div className="page-title">Run Schedule</div>
-        <div className="page-sub">Generate and export student schedules</div>
-      </div>
-
-      {!canRun && (
-        <div className="alert alert-warn">
-          ⚠ Complete setup first — you need at least one period configured and students uploaded before running.
-        </div>
-      )}
-
-      <div className="card">
-        <div className="card-title">New Run</div>
-        <div style={{display:'flex',gap:10,alignItems:'flex-end'}}>
-          <div style={{flex:1}}>
-            <label>Run Name (used as export filename)</label>
-            <input value={runName} onChange={e => setRunName(e.target.value)} placeholder="Schedule_Run_1" />
-          </div>
-          <button className="btn btn-primary" onClick={run} disabled={!canRun || running}>
-            {running ? "⏳ Running..." : "▶ Run Scheduler"}
-          </button>
-        </div>
-
-        {running && (
-          <div style={{marginTop:16}}>
-            <div style={{fontSize:12,color:'var(--text2)',marginBottom:6}}>Processing {students.length} students...</div>
-            <div className="progress-bar"><div className="progress-fill" style={{width:'100%',animation:'none',background:'var(--accent)'}} /></div>
-          </div>
-        )}
-      </div>
-
-      {lastResult && (
-        <div className="card" style={{borderColor:'rgba(126,240,162,0.3)'}}>
-          <div className="card-title">Latest Run — {lastResult.name}</div>
-          <div className="stat-grid">
-            <div className="stat-card">
-              <div className="stat-label">Total Students</div>
-              <div className="stat-value">{lastResult.totalStudents}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Fully Assigned</div>
-              <div className="stat-value" style={{color:'var(--accent)'}}>{lastResult.assigned}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Conflicts</div>
-              <div className="stat-value" style={{color: lastResult.conflicts > 0 ? 'var(--danger)' : 'var(--accent)'}}>{lastResult.conflicts}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Assignment Rate</div>
-              <div className="stat-value">{Math.round((lastResult.assigned/lastResult.totalStudents)*100)}%</div>
-            </div>
-          </div>
-          <button className="btn btn-primary" onClick={() => exportToExcel(lastResult.result, state, lastResult.name)}>
-            ↓ Export to Excel
-          </button>
-        </div>
-      )}
-
-      {runs.length > 0 && (
-        <div className="card">
-          <div className="card-title">Run History</div>
-          {runs.map(r => (
-            <div key={r.id} className="run-item">
-              <div>
-                <div style={{color:'var(--text)',fontSize:13,marginBottom:3}}>{r.name}</div>
-                <div style={{fontSize:11,color:'var(--text3)'}}>{r.date} · {r.totalStudents} students</div>
-              </div>
-              <div className="flex-gap">
-                {r.conflicts > 0
-                  ? <span className="tag tag-red">{r.conflicts} conflicts</span>
-                  : <span className="tag tag-green">Clean</span>}
-                <span style={{fontSize:12,color:'var(--text2)'}}>{Math.round((r.assigned/r.totalStudents)*100)}% assigned</span>
-                <button className="btn btn-ghost btn-sm" onClick={() => exportToExcel(r.result, state, r.name)}>↓ Export</button>
-                <button className="btn btn-danger btn-sm" onClick={() => setState(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) }))}>Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    React.createElement("div", null,
+      React.createElement("div", { className: "page-header" }, React.createElement("div", { className: "page-title" }, "Run Schedule"), React.createElement("div", { className: "page-sub" }, "Generate and export student schedules")),
+      !canRun && React.createElement("div", { className: "alert alert-warn" }, "Complete setup first - need periods configured and students uploaded."),
+      React.createElement("div", { className: "card" },
+        React.createElement("div", { className: "card-title" }, "New Run"),
+        React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "flex-end" } },
+          React.createElement("div", { style: { flex: 1 } }, React.createElement("label", null, "Run Name"), React.createElement("input", { value: runName, onChange: e => setRunName(e.target.value), placeholder: "Schedule_Run_1" })),
+          React.createElement("button", { className: "btn btn-primary", onClick: doRun, disabled: !canRun || running }, running ? "Running..." : "Run Scheduler")
+        )
+      ),
+      lastRun && React.createElement("div", { className: "card", style: { borderColor: "rgba(126,240,162,0.3)" } },
+        React.createElement("div", { className: "card-title" }, "Latest: " + lastRun.name),
+        React.createElement("div", { className: "stats" },
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Total"), React.createElement("div", { className: "stat-value" }, lastRun.totalStudents)),
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Assigned"), React.createElement("div", { className: "stat-value", style: { color: "var(--accent)" } }, lastRun.assigned)),
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Conflicts"), React.createElement("div", { className: "stat-value", style: { color: lastRun.conflicts > 0 ? "var(--danger)" : "var(--accent)" } }, lastRun.conflicts)),
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Rate"), React.createElement("div", { className: "stat-value" }, Math.round((lastRun.assigned / lastRun.totalStudents) * 100) + "%"))
+        ),
+        React.createElement("button", { className: "btn btn-primary", onClick: () => exportToExcel(lastRun.result, state, lastRun.name) }, "Export to Excel")
+      ),
+      runs.length > 0 && React.createElement("div", { className: "card" },
+        React.createElement("div", { className: "card-title" }, "Run History"),
+        runs.map(r =>
+          React.createElement("div", { key: r.id, className: "row" },
+            React.createElement("div", null,
+              React.createElement("div", { style: { color: "var(--text)", fontSize: 13, marginBottom: 3 } }, r.name),
+              React.createElement("div", { style: { fontSize: 11, color: "var(--text3)" } }, r.date + " - " + r.totalStudents + " students")
+            ),
+            React.createElement("div", { className: "flex" },
+              r.conflicts > 0 ? React.createElement("span", { className: "tag tag-red" }, r.conflicts + " conflicts") : React.createElement("span", { className: "tag tag-green" }, "Clean"),
+              React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, Math.round((r.assigned / r.totalStudents) * 100) + "%"),
+              React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => exportToExcel(r.result, state, r.name) }, "Export"),
+              React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => del(r.id) }, "Delete")
+            )
+          )
+        )
+      )
+    )
   );
 }
 
-// ─── CONFLICTS PAGE ───────────────────────────────────────────────────────────
 function ConflictsPage({ state, setState }) {
   const { runs = [], electives = [], periods = [] } = state;
-  const [selectedRun, setSelectedRun] = useState(null);
+  const [selRun, setSelRun] = useState(null);
   const [overrides, setOverrides] = useState({});
-  const [previewCap, setPreviewCap] = useState({});
+  const [caps, setCaps] = useState({});
   const [autoRunning, setAutoRunning] = useState(false);
-  const [showClearModal, setShowClearModal] = useState(false);
-
-  const activeRunId = selectedRun || runs[0]?.id;
-  const activeRun = runs.find(r => r.id === activeRunId);
-  const conflicts = activeRun?.result?.conflicts || [];
-
-  const getElectiveInfo = (name) => {
+  const [showClear, setShowClear] = useState(false);
+  const activeId = selRun || (runs[0] && runs[0].id);
+  const activeRun = runs.find(r => r.id === activeId);
+  const conflicts = (activeRun && activeRun.result && activeRun.result.conflicts) || [];
+  const sortedElectives = [...electives].filter(e => !e.isElaIntervention && !e.isMathIntervention).sort((a, b) => {
+    const ap = (a.availablePeriods || "").split(",").filter(Boolean).length || 99;
+    const bp = (b.availablePeriods || "").split(",").filter(Boolean).length || 99;
+    return ap - bp;
+  });
+  const getInfo = name => {
     const e = electives.find(el => el.name.toLowerCase() === name.toLowerCase());
     if (!e) return null;
-    const avail = (e.availablePeriods || '').split(',').map(p => p.trim()).filter(Boolean);
-    const periodLabels = avail.map(pid => {
-      const p = periods.find(x => x.id === pid);
-      return p ? `${p.label}${p.startTime ? ' ('+p.startTime+')' : ''}` : pid;
-    });
-    return { elective: e, periods: periodLabels, periodIds: avail, cap: parseInt(e.maxSize) || 25 };
+    const avail = (e.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
+    const pLabels = avail.map(pid => { const p = periods.find(x => x.id === pid); return p ? p.label + (p.startTime ? " (" + p.startTime + ")" : "") : pid; });
+    return { elective: e, periods: pLabels, periodIds: avail, cap: parseInt(e.maxSize) || 25 };
   };
-
-  const sortedElectives = [...electives]
-    .filter(e => !e.isElaIntervention && !e.isMathIntervention)
-    .sort((a, b) => {
-      const aP = (a.availablePeriods || '').split(',').filter(Boolean).length || 99;
-      const bP = (b.availablePeriods || '').split(',').filter(Boolean).length || 99;
-      return aP - bP;
-    });
-
-  // ── Auto-assign: bump caps as needed based on student ranked choices ────────
+  const reRun = () => {
+    const result = runScheduler(state);
+    const r = { id: "run_" + Date.now(), name: (activeRun ? activeRun.name : "Schedule") + "_resolved", date: new Date().toLocaleString(), totalStudents: state.students.length, conflicts: result.conflicts.length, assigned: state.students.length - result.conflicts.length, result };
+    setState(s => ({ ...s, runs: [r, ...s.runs] }));
+  };
   const autoAssign = () => {
     setAutoRunning(true);
     setTimeout(() => {
-      let newElectives = [...state.electives];
-      const resolvedStudents = new Set();
-
-      conflicts.forEach(c => {
+      let newElectives = state.electives.map(e => ({ ...e }));
+      let curRun = activeRun ? JSON.parse(JSON.stringify(activeRun)) : null;
+      if (!curRun) { setAutoRunning(false); return; }
+      curRun.result.conflicts.slice().forEach(c => {
         const grade = parseInt(c.student.grade);
         for (const choice of (c.choices || [])) {
-          const eIdx = newElectives.findIndex(e =>
-            e.name.toLowerCase() === choice.toLowerCase() &&
-            !e.isElaIntervention && !e.isMathIntervention &&
-            (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade)
-          );
+          const eIdx = newElectives.findIndex(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention && (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade));
           if (eIdx === -1) continue;
-          // Bump cap by 1 to fit this student
-          const current = parseInt(newElectives[eIdx].maxSize) || 25;
-          newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(current + 1) };
-          resolvedStudents.add(c.student.student_id);
+          const cur = parseInt(newElectives[eIdx].maxSize) || 25;
+          newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(cur + 1) };
+          const el = newElectives[eIdx];
+          const avail = (el.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
+          const sa = curRun.result.assignments.find(a => a.student.student_id === c.student.student_id);
+          const usedPids = sa ? Object.keys(sa.schedule) : [];
+          const pids = periods.map(p => p.id);
+          const openP = avail.length > 0 ? avail.find(p => !usedPids.includes(p)) : pids.find(p => !usedPids.includes(p));
+          if (openP && sa) {
+            curRun.result.assignments = curRun.result.assignments.map(a => {
+              if (a.student.student_id !== c.student.student_id) return a;
+              return { ...a, elective: el.name, schedule: { ...a.schedule, [openP]: "[E] " + el.name }, conflicts: [] };
+            });
+            curRun.result.conflicts = curRun.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id);
+          }
           break;
         }
       });
-
-      // Re-run scheduler with updated caps
-      const newState = { ...state, electives: newElectives };
-      const result = runScheduler(newState);
-      const run = {
-        id: `run_${Date.now()}`,
-        name: (activeRun?.name || 'Schedule') + '_auto_resolved',
-        date: new Date().toLocaleString(),
-        totalStudents: state.students.length,
-        conflicts: result.conflicts.length,
-        assigned: state.students.length - result.conflicts.length,
-        result
-      };
-      setState(s => ({ ...s, electives: newElectives, runs: [run, ...s.runs] }));
+      const updated = { ...curRun, name: curRun.name + "_auto", id: "run_" + Date.now(), date: new Date().toLocaleString(), conflicts: curRun.result.conflicts.length, assigned: state.students.length - curRun.result.conflicts.length };
+      setState(s => ({ ...s, electives: newElectives, runs: [updated, ...s.runs] }));
       setAutoRunning(false);
-    }, 600);
+    }, 400);
   };
-
-  const reRun = () => {
-    const result = runScheduler(state);
-    const run = {
-      id: `run_${Date.now()}`,
-      name: (activeRun?.name || 'Schedule') + '_resolved',
-      date: new Date().toLocaleString(),
-      totalStudents: state.students.length,
-      conflicts: result.conflicts.length,
-      assigned: state.students.length - result.conflicts.length,
-      result
-    };
-    setState(s => ({ ...s, runs: [run, ...s.runs] }));
-  };
-
-  return (
-    <div>
-      {/* ── Clear & Start Over Modal ── */}
-      {showClearModal && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowClearModal(false)}>
-          <div className="modal">
-            <div className="modal-title">Clear All Data</div>
-            <p style={{color:'var(--text2)',fontSize:13,marginBottom:12}}>
-              This will permanently delete all students, classes, electives, run history, and configuration. The school name and period setup will also be cleared.
-            </p>
-            <div className="alert alert-error">⚠ This cannot be undone.</div>
-            <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowClearModal(false)}>Cancel</button>
-              <button className="btn btn-danger" onClick={() => {
-                setState(() => ({
-                  schoolName: "",
-                  numPeriods: 6,
-                  periods: [],
-                  classes: [],
-                  electives: [],
-                  students: [],
-                  runs: [],
-                }));
-                setShowClearModal(false);
-              }}>Yes, Clear Everything</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="page-header">
-        <div className="flex-between">
-          <div>
-            <div className="page-title">Conflicts</div>
-            <div className="page-sub">Review and manually resolve scheduling conflicts</div>
-          </div>
-          <div className="flex-gap">
-            {runs.length > 1 && (
-              <select style={{width:'auto'}} value={activeRunId} onChange={e => setSelectedRun(e.target.value)}>
-                {runs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
-            )}
-            {conflicts.length > 0 && (
-              <>
-                <button className="btn btn-secondary" onClick={autoAssign} disabled={autoRunning}>
-                  {autoRunning ? '⏳ Running...' : '⚡ Auto-Assign Conflicts'}
-                </button>
-                <button className="btn btn-primary" onClick={reRun}>↺ Re-run Schedule</button>
-              </>
-            )}
-            <button className="btn btn-danger btn-sm" onClick={() => setShowClearModal(true)}>🗑 Clear All Data</button>
-          </div>
-        </div>
-      </div>
-
-      {conflicts.length > 0 && (
-        <div className="alert alert-info" style={{marginBottom:16}}>
-          ℹ <strong>Auto-Assign</strong> will bump class caps by 1 for each conflicted student's top available choice and re-run the scheduler automatically. You can also resolve each conflict manually below.
-        </div>
-      )}
-
-      {!activeRun && (
-        <div className="empty">
-          <div className="empty-icon">✅</div>
-          <div className="empty-title">No runs yet</div>
-          <div className="empty-sub">Run the scheduler first to see conflicts here</div>
-        </div>
-      )}
-
-      {activeRun && conflicts.length === 0 && (
-        <div className="alert alert-success">✓ No conflicts in this run — all students were successfully assigned.</div>
-      )}
-
-      {conflicts.map((c, i) => {
-        const selectedElective = overrides[c.student.student_id];
-        const info = selectedElective ? getElectiveInfo(selectedElective) : null;
-        const capOverride = previewCap[c.student.student_id];
-
-        // Build this student's current schedule for display
-        const studentAssignment = activeRun?.result?.assignments?.find(
-          a => a.student.student_id === c.student.student_id
-        );
-        const usedPeriods = studentAssignment?.schedule || {};
-
-        return (
-          <div key={i} className="conflict-card">
-            <div className="conflict-header">
-              <div>
-                <div className="conflict-name">{c.student.student_name}</div>
-                <div style={{fontSize:11,color:'var(--text3)'}}>{c.student.student_id} · Grade {c.student.grade}{c.student.designation ? ` · ${c.student.designation}` : ""}</div>
-              </div>
-              <span className="tag tag-red">Elective Unassigned</span>
-            </div>
-
-            {/* Student's current schedule */}
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:6}}>Current Schedule</div>
-              <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                {periods.map(p => {
-                  const cls = usedPeriods[p.id];
-                  return (
-                    <div key={p.id} style={{
-                      background: cls ? 'var(--surface2)' : 'rgba(255,107,107,0.08)',
-                      border: `1px solid ${cls ? 'var(--border)' : 'rgba(255,107,107,0.3)'}`,
-                      borderRadius:5, padding:'5px 10px', minWidth:100
-                    }}>
-                      <div style={{fontSize:9,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.06em'}}>{p.label}</div>
-                      <div style={{fontSize:11,color: cls ? 'var(--text)' : 'var(--danger)',marginTop:2}}>
-                        {cls ? cls.replace('[E] ','') : '⚠ Empty'}
-                      </div>
-                      {p.startTime && <div style={{fontSize:9,color:'var(--text3)'}}>{p.startTime}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={{marginBottom:12}}>
-              <span style={{fontSize:11,color:'var(--text3)'}}>Submitted choices: </span>
-              {(c.choices||[]).map(ch => <span key={ch} className="tag tag-gray" style={{marginRight:2}}>{ch}</span>)}
-            </div>
-
-            {/* Elective period availability reference */}
-            {c.choices && c.choices.length > 0 && (
-              <div style={{marginBottom:12}}>
-                <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:6}}>Elective Period Availability</div>
-                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                  {c.choices.slice(0,6).map(ch => {
-                    const inf = getElectiveInfo(ch);
-                    if (!inf) return null;
-                    return (
-                      <div key={ch} style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:5,padding:'5px 10px'}}>
-                        <div style={{fontSize:11,color:'var(--text)',marginBottom:2}}>{ch}</div>
-                        <div style={{fontSize:10,color:'var(--text3)'}}>
-                          {inf.periods.length > 0 ? inf.periods.join(' · ') : 'Any period'}
-                          &nbsp;·&nbsp;Cap: {inf.cap}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div style={{display:'grid',gridTemplateColumns:'1fr 160px',gap:12,marginBottom:12}}>
-              <div>
-                <label>Manually assign elective <span style={{color:'var(--text3)',fontSize:10}}>(most constrained first)</span></label>
-                <select
-                  value={selectedElective || ""}
-                  onChange={e => {
-                    setOverrides(o => ({ ...o, [c.student.student_id]: e.target.value }));
-                    setPreviewCap(p => { const n = {...p}; delete n[c.student.student_id]; return n; });
-                  }}
-                >
-                  <option value="">— Select elective —</option>
-                  {sortedElectives.map(e => {
-                    const ps = (e.availablePeriods || '').split(',').filter(Boolean);
-                    const label = ps.length === 1
-                      ? ` (${periods.find(p=>p.id===ps[0])?.label || ps[0]} only)`
-                      : ps.length > 1 ? ` (${ps.length} periods)` : ' (any period)';
-                    return <option key={e.id} value={e.name}>{e.name}{label}</option>;
-                  })}
-                </select>
-              </div>
-              {info && (
-                <div>
-                  <label>Adjust cap <span style={{color:'var(--text3)',fontSize:10}}>(current: {info.cap})</span></label>
-                  <input
-                    type="number" min="1"
-                    value={capOverride !== undefined ? capOverride : info.cap}
-                    onChange={e => setPreviewCap(p => ({ ...p, [c.student.student_id]: parseInt(e.target.value) || info.cap }))}
-                  />
-                </div>
-              )}
-            </div>
-
-            {info && (
-              <div className="alert alert-info" style={{marginBottom:12}}>
-                <div>
-                  <strong>{info.elective.name}</strong>
-                  {info.elective.isYearLong ? <span className="tag tag-green" style={{marginLeft:6}}>Year-Long</span> : <span className="tag tag-blue" style={{marginLeft:6}}>Semester</span>}
-                  <div style={{fontSize:11,marginTop:4}}>
-                    Periods: {info.periods.length > 0 ? info.periods.join(', ') : 'Any period'}
-                    &nbsp;·&nbsp;
-                    Cap: {capOverride !== undefined ? capOverride : info.cap}
-                    {capOverride !== undefined && capOverride !== info.cap && (
-                      <span style={{color:'var(--accent3)',marginLeft:8}}>⚠ Cap will update on Apply</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div style={{display:'flex',justifyContent:'flex-end'}}>
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={!selectedElective}
-                onClick={() => {
-                  const override = selectedElective;
-                  const newCap = previewCap[c.student.student_id];
-                  setState(s => {
-                    let newElectives = s.electives;
-                    if (newCap !== undefined && info) {
-                      newElectives = s.electives.map(e =>
-                        e.id === info.elective.id ? { ...e, maxSize: String(newCap) } : e
-                      );
-                    }
-                    const runs = s.runs.map(r => {
-                      if (r.id !== activeRunId) return r;
-                      return {
-                        ...r,
-                        conflicts: r.conflicts - 1,
-                        assigned: r.assigned + 1,
-                        result: {
-                          ...r.result,
-                          assignments: r.result.assignments.map(a => {
-                            if (a.student.student_id !== c.student.student_id) return a;
-                            const openPeriod = periods.find(p => !a.schedule[p.id]);
-                            if (openPeriod) {
-                              return { ...a, elective: override, schedule: { ...a.schedule, [openPeriod.id]: `[E] ${override}` } };
-                            }
-                            return { ...a, elective: override };
-                          }),
-                          conflicts: r.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id)
-                        }
-                      };
-                    });
-                    return { ...s, electives: newElectives, runs };
-                  });
-                  setOverrides(o => { const n = {...o}; delete n[c.student.student_id]; return n; });
-                  setPreviewCap(p => { const n = {...p}; delete n[c.student.student_id]; return n; });
-                }}
-              >
-                Apply
-              </button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
-function App() {
-  const [state, setStateRaw] = useState(() => loadState() || DEFAULT_STATE);
-  const [page, setPage] = useState("setup");
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-
-  const setState = useCallback((updater) => {
-    setStateRaw(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      saveState(next);
-      return next;
+  const apply = (c, override, newCap, info) => {
+    setState(s => {
+      let newElectives = s.electives;
+      if (newCap !== undefined && info) newElectives = s.electives.map(e => e.id === info.elective.id ? { ...e, maxSize: String(newCap) } : e);
+      const newRuns = s.runs.map(r => {
+        if (r.id !== activeId) return r;
+        return { ...r, conflicts: r.conflicts - 1, assigned: r.assigned + 1, result: { ...r.result, assignments: r.result.assignments.map(a => { if (a.student.student_id !== c.student.student_id) return a; const op = periods.find(p => !a.schedule[p.id]); if (op) return { ...a, elective: override, schedule: { ...a.schedule, [op.id]: "[E] " + override } }; return { ...a, elective: override }; }), conflicts: r.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id) } };
+      });
+      return { ...s, electives: newElectives, runs: newRuns };
     });
-  }, []);
-
-  // OTA version check
-  useEffect(() => {
-    fetch(VERSION_URL + "?v=" + Date.now())
-      .then(r => r.json())
-      .then(data => {
-        if (data.version && data.version !== APP_VERSION) setUpdateAvailable(true);
-      })
-      .catch(() => {});
-  }, []);
-
-  const conflictCount = state.runs[0]?.result?.conflicts?.length || 0;
-
-  const STEPS = ["setup", "classes", "students", "schedule", "conflicts"];
-  const STEP_LABELS = {
-    setup: "School Setup",
-    classes: "Classes & Electives",
-    students: "Students",
-    schedule: "Run Schedule",
-    conflicts: "Conflicts"
+    setOverrides(o => { const n = { ...o }; delete n[c.student.student_id]; return n; });
+    setCaps(cp => { const n = { ...cp }; delete n[c.student.student_id]; return n; });
   };
-
-  const isStepComplete = (id) => {
-    switch(id) {
-      case "setup":
-        return !!(state.schoolName && state.schoolName.trim() && state.periods.length > 0 && state.periods.every(p => p.startTime && p.endTime));
-      case "classes":
-        return state.classes.length > 0 && state.electives.length > 0;
-      case "students":
-        return state.students.length > 0;
-      case "schedule":
-        return state.runs.length > 0;
-      case "conflicts":
-        return true;
-      default: return false;
-    }
-  };
-
-  const navItems = [
-    { id: "setup", label: "School Setup", section: "Configure" },
-    { id: "classes", label: "Classes & Electives", section: null },
-    { id: "students", label: "Students", section: "Data" },
-    { id: "schedule", label: "Run Schedule", section: "Schedule" },
-    { id: "conflicts", label: "Conflicts", badge: conflictCount > 0 ? conflictCount : null, section: null },
-  ];
-
-  let sections = [];
-  navItems.forEach(item => {
-    if (item.section) sections.push(item.section);
-  });
-
   return (
-    <div>
-      {updateAvailable && <UpdateBanner onDismiss={() => setUpdateAvailable(false)} />}
-      <div className="shell">
-        <div className="sidebar">
-          <div className="logo">
-            <div className="logo-title">{state.schoolName || "School Scheduler"}</div>
-            <div className="logo-sub">Schedule Manager</div>
-          </div>
-          <nav className="nav">
-            {(() => {
-              let lastSection = null;
-              return navItems.map(item => (
-                <React.Fragment key={item.id}>
-                  {item.section && item.section !== lastSection && (() => { lastSection = item.section; return <div className="nav-section">{item.section}</div>; })()}
-                  <div className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)}>
-                    <div className="dot" />
-                    {item.label}
-                    {item.badge && <span className="nav-badge">{item.badge}</span>}
-                    {!item.badge && isStepComplete(item.id) && page !== item.id && (
-                      <span style={{marginLeft:'auto',color:'var(--accent)',fontSize:12}}>✓</span>
-                    )}
-                  </div>
-                </React.Fragment>
-              ));
-            })()}
-          </nav>
-          <div className="sidebar-footer">
-            <div className="version-tag">v{APP_VERSION}</div>
-            <div style={{marginTop:2}}>© 2026 School Scheduler</div>
-          </div>
-        </div>
-        <div className="main">
-          {page === "setup" && <SetupPage state={state} setState={setState} />}
-          {page === "classes" && <ClassesPage state={state} setState={setState} />}
-          {page === "students" && <StudentsPage state={state} setState={setState} />}
-          {page === "schedule" && <SchedulePage state={state} setState={setState} />}
-          {page === "conflicts" && <ConflictsPage state={state} setState={setState} />}
-          {page !== "conflicts" && (() => {
-            const idx = STEPS.indexOf(page);
-            const nextStep = STEPS[idx + 1];
-            const canAdvance = isStepComplete(page);
-            return (
-              <div style={{marginTop:32,paddingTop:20,borderTop:'1px solid var(--border)',display:'flex',justifyContent:'flex-end',alignItems:'center',gap:12}}>
-                {!canAdvance && (
-                  <span style={{fontSize:11,color:'var(--text3)'}}>Complete this step to continue</span>
-                )}
-                <button
-                  className="btn btn-primary"
-                  disabled={!canAdvance}
-                  onClick={() => setPage(nextStep)}
-                >
-                  Next: {STEP_LABELS[nextStep]} →
-                </button>
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-    </div>
+    React.createElement("div", null,
+      showClear && React.createElement("div", { className: "modal-overlay", onClick: e => e.target === e.currentTarget && setShowClear(false) },
+        React.createElement("div", { className: "modal" },
+          React.createElement("div", { className: "modal-title" }, "Clear All Data"),
+          React.createElement("p", { style: { color: "var(--text2)", fontSize: 13, marginBottom: 12 } }, "This will delete everything - students, classes, periods, and all run history. Cannot be undone."),
+          React.createElement("div", { className: "alert alert-error" }, "This cannot be undone."),
+          React.createElement("div", { className: "modal-actions" },
+            React.createElement("button", { className: "btn btn-ghost", onClick: () => setShowClear(false) }, "Cancel"),
+            React.createElement("button", { className: "btn btn-danger", onClick: () => { setState(() => ({ ...BLANK })); setShowClear(false); } }, "Yes, Clear Everything")
+          )
+        )
+      ),
+      React.createElement("div", { className: "page-header" },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Conflicts"), React.createElement("div", { className: "page-sub" }, "Review and resolve scheduling conflicts")),
+          React.createElement("div", { className: "flex" },
+            runs.length > 1 && React.createElement("select", { style: { width: "auto" }, value: activeId || "", onChange: e => setSelRun(e.target.value) }, runs.map(r => React.createElement("option", { key: r.id, value: r.id }, r.name))),
+            conflicts.length > 0 && React.createElement("button", { className: "btn btn-secondary", onClick: autoAssign, disabled: autoRunning }, autoRunning ? "Running..." : "Auto-Assign"),
+            conflicts.length > 0 && React.createElement("button", { className: "btn btn-primary", onClick: reRun }, "Re-run Schedule"),
+            React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => setShowClear(true) }, "Clear All Data")
+          )
+        )
+      ),
+      conflicts.length > 0 && React.createElement("div", { className: "alert alert-info", style: { marginBottom: 16 } }, "Auto-Assign will bump caps by 1 for each student's top choice and re-run. You can also resolve manually below."),
+      !activeRun && React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "No runs yet"), React.createElement("div", { className: "empty-sub" }, "Run the scheduler first")),
+      activeRun && conflicts.length === 0 && React.createElement("div", { className: "alert alert-success" }, "No conflicts - all students assigned successfully."),
+      conflicts.map((c, i) => {
+        const sel = overrides[c.student.student_id];
+        const info = sel ? getInfo(sel) : null;
+        const capOv = caps[c.student.student_id];
+        const sa = activeRun && activeRun.result && activeRun.result.assignments && activeRun.result.assignments.find(a => a.student.student_id === c.student.student_id);
+        const sched = sa ? sa.schedule : {};
+        return React.createElement("div", { key: i, className: "conflict-card" },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 } },
+            React.createElement("div", null,
+              React.createElement("div", { style: { color: "var(--text)", fontWeight: 500 } }, c.student.student_name),
+              React.createElement("div", { style: { fontSize: 11, color: "var(--text3)" } }, c.student.student_id + " - Grade " + c.student.grade + (c.student.designation ? " - " + c.student.designation : ""))
+            ),
+            React.createElement("span", { className: "tag tag-red" }, "Unassigned")
+          ),
+          React.createElement("div", { style: { marginBottom: 10 } },
+            React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase", marginBottom: 6 } }, "Current Schedule"),
+            React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+              periods.map(p => {
+                const cls = sched[p.id];
+                return React.createElement("div", { key: p.id, className: "period-pill " + (cls ? "" : "period-pill-empty") },
+                  React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase" } }, p.label),
+                  React.createElement("div", { style: { fontSize: 11, color: cls ? "var(--text)" : "var(--danger)", marginTop: 2 } }, cls ? cls.replace("[E] ", "") : "Empty"),
+                  p.startTime && React.createElement("div", { style: { fontSize: 9, color: "var(--text3)" } }, p.startTime)
+                );
+              })
+            )
+          ),
+          React.createElement("div", { style: { marginBottom: 10 } },
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "Choices: "),
+            (c.choices || []).map(ch => React.createElement("span", { key: ch, className: "tag tag-gray" }, ch))
+          ),
+          c.choices && c.choices.length > 0 && React.createElement("div", { style: { marginBottom: 12 } },
+            React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase", marginBottom: 6 } }, "Elective Availability"),
+            React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+              c.choices.slice(0, 6).map(ch => {
+                const inf = getInfo(ch);
+                if (!inf) return null;
+                return React.createElement("div", { key: ch, style: { background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 5, padding: "5px 10px" } },
+                  React.createElement("div", { style: { fontSize: 11, color: "var(--text)", marginBottom: 2 } }, ch),
+                  React.createElement("div", { style: { fontSize: 10, color: "var(--text3)" } }, (inf.periods.length > 0 ? inf.periods.join(" / ") : "Any period") + " - Cap: " + inf.cap)
+                );
+              })
+            )
+          ),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 160px", gap: 12, marginBottom: 12 } },
+            React.createElement("div", null,
+              React.createElement("label", null, "Assign elective (most constrained first)"),
+              React.createElement("select", { value: sel || "", onChange: e => { setOverrides(o => ({ ...o, [c.student.student_id]: e.target.value })); setCaps(cp => { const n = { ...cp }; delete n[c.student.student_id]; return n; }); } },
+                React.createElement("option", { value: "" }, "-- Select elective --"),
+                sortedElectives.map(e => {
+                  const ps = (e.availablePeriods || "").split(",").filter(Boolean);
+                  const lbl = ps.length === 1 ? " (" + (periods.find(p => p.id === ps[0]) ? periods.find(p => p.id === ps[0]).label : ps[0]) + " only)" : ps.length > 1 ? " (" + ps.length + " periods)" : " (any period)";
+                  return React.createElement("option", { key: e.id, value: e.name }, e.name + lbl);
+                })
+              )
+            ),
+            info && React.createElement("div", null,
+              React.createElement("label", null, "Adjust cap (current: " + info.cap + ")"),
+              React.createElement("input", { type: "number", min: "1", value: capOv !== undefined ? capOv : info.cap, onChange: e => setCaps(cp => ({ ...cp, [c.student.student_id]: parseInt(e.target.value) || info.cap })) })
+            )
+          ),
+          info && React.createElement("div", { className: "alert alert-info", style: { marginBottom: 12 } },
+            React.createElement("strong", null, info.elective.name), " - ",
+            "Periods: " + (info.periods.length > 0 ? info.periods.join(", ") : "Any") + " - Cap: " + (capOv !== undefined ? capOv : info.cap),
+            capOv !== undefined && capOv !== info.cap && React.createElement("span", { style: { color: "var(--accent3)", marginLeft: 8 } }, " Cap will update on Apply")
+          ),
+          React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
+            React.createElement("button", { className: "btn btn-primary btn-sm", disabled: !sel, onClick: () => apply(c, sel, capOv, info) }, "Apply")
+          )
+        );
+      })
+    )
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+function App() {
+  const [state, setStateRaw] = useState(() => load() || { ...BLANK });
+  const [page, setPage] = useState("setup");
+  const [updateAvail, setUpdateAvail] = useState(false);
+  const setState = useCallback(updater => {
+    setStateRaw(prev => { const next = typeof updater === "function" ? updater(prev) : updater; save(next); return next; });
+  }, []);
+  useEffect(() => {
+    fetch(VERSION_URL + "?v=" + Date.now()).then(r => r.json()).then(d => { if (d.version && d.version !== APP_VERSION) setUpdateAvail(true); }).catch(() => {});
+  }, []);
+  const STEPS = ["setup", "classes", "students", "schedule", "conflicts"];
+  const LABELS = { setup: "School Setup", classes: "Classes & Electives", students: "Students", schedule: "Run Schedule", conflicts: "Conflicts" };
+  const isComplete = id => {
+    if (id === "setup") return !!(state.schoolName && state.schoolName.trim() && state.periods.length > 0 && state.periods.every(p => p.startTime && p.endTime));
+    if (id === "classes") return state.classes.length > 0 && state.electives.length > 0;
+    if (id === "students") return state.students.length > 0;
+    if (id === "schedule") return state.runs.length > 0;
+    return true;
+  };
+  const conflictCount = state.runs[0] && state.runs[0].result && state.runs[0].result.conflicts ? state.runs[0].result.conflicts.length : 0;
+  const idx = STEPS.indexOf(page);
+  const nextPage = STEPS[idx + 1];
+  return (
+    React.createElement("div", null,
+      updateAvail && React.createElement("div", { className: "update-bar" },
+        React.createElement("span", null, "A new version is available"),
+        React.createElement("button", { onClick: () => { window.location.href = APP_URL + "?v=" + Date.now(); } }, "Update Now"),
+        React.createElement("button", { onClick: () => setUpdateAvail(false), style: { background: "transparent", color: "#1a1a00", border: "none", cursor: "pointer", fontSize: 14 } }, "x")
+      ),
+      React.createElement("div", { className: "shell" },
+        React.createElement("div", { className: "sidebar" },
+          React.createElement("div", { className: "logo" },
+            React.createElement("div", { className: "logo-title" }, state.schoolName || "School Scheduler"),
+            React.createElement("div", { className: "logo-sub" }, "Schedule Manager")
+          ),
+          React.createElement("nav", { className: "nav" },
+            React.createElement("div", { className: "nav-section" }, "Configure"),
+            React.createElement("div", { className: "nav-item " + (page === "setup" ? "active" : ""), onClick: () => setPage("setup") }, React.createElement("div", { className: "nav-dot" }), "School Setup", isComplete("setup") && page !== "setup" && React.createElement("span", { className: "nav-check" }, "v")),
+            React.createElement("div", { className: "nav-item " + (page === "classes" ? "active" : ""), onClick: () => setPage("classes") }, React.createElement("div", { className: "nav-dot" }), "Classes & Electives", isComplete("classes") && page !== "classes" && React.createElement("span", { className: "nav-check" }, "v")),
+            React.createElement("div", { className: "nav-section" }, "Data"),
+            React.createElement("div", { className: "nav-item " + (page === "students" ? "active" : ""), onClick: () => setPage("students") }, React.createElement("div", { className: "nav-dot" }), "Students", isComplete("students") && page !== "students" && React.createElement("span", { className: "nav-check" }, "v")),
+            React.createElement("div", { className: "nav-section" }, "Schedule"),
+            React.createElement("div", { className: "nav-item " + (page === "schedule" ? "active" : ""), onClick: () => setPage("schedule") }, React.createElement("div", { className: "nav-dot" }), "Run Schedule", isComplete("schedule") && page !== "schedule" && React.createElement("span", { className: "nav-check" }, "v")),
+            React.createElement("div", { className: "nav-item " + (page === "conflicts" ? "active" : ""), onClick: () => setPage("conflicts") }, React.createElement("div", { className: "nav-dot" }), "Conflicts", conflictCount > 0 && React.createElement("span", { className: "nav-badge" }, conflictCount))
+          ),
+          React.createElement("div", { className: "sidebar-footer" }, React.createElement("div", null, "v" + APP_VERSION), React.createElement("div", { style: { marginTop: 2 } }, "School Scheduler"))
+        ),
+        React.createElement("div", { className: "main" },
+          page === "setup" && React.createElement(SetupPage, { state: state, setState: setState }),
+          page === "classes" && React.createElement(ClassesPage, { state: state, setState: setState }),
+          page === "students" && React.createElement(StudentsPage, { state: state, setState: setState }),
+          page === "schedule" && React.createElement(SchedulePage, { state: state, setState: setState }),
+          page === "conflicts" && React.createElement(ConflictsPage, { state: state, setState: setState }),
+          page !== "conflicts" && nextPage && React.createElement("div", { className: "next-bar" },
+            !isComplete(page) && React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "Complete this step to continue"),
+            React.createElement("button", { className: "btn btn-primary", disabled: !isComplete(page), onClick: () => setPage(nextPage) }, "Next: " + LABELS[nextPage] + " >")
+          )
+        )
+      )
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
 </script>
 </body>
 </html>
