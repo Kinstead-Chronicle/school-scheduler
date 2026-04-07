@@ -1391,21 +1391,24 @@ function ConflictsPage({ state, setState }) {
   const [selectedRun, setSelectedRun] = useState(null);
   const [overrides, setOverrides] = useState({});
   const [previewCap, setPreviewCap] = useState({});
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
 
   const activeRunId = selectedRun || runs[0]?.id;
   const activeRun = runs.find(r => r.id === activeRunId);
   const conflicts = activeRun?.result?.conflicts || [];
 
-  // Get elective availability info for a given elective name
   const getElectiveInfo = (name) => {
     const e = electives.find(el => el.name.toLowerCase() === name.toLowerCase());
     if (!e) return null;
     const avail = (e.availablePeriods || '').split(',').map(p => p.trim()).filter(Boolean);
-    const periodLabels = avail.map(pid => periods.find(p => p.id === pid)?.label || pid);
-    return { elective: e, periods: periodLabels, cap: parseInt(e.maxSize) || 25 };
+    const periodLabels = avail.map(pid => {
+      const p = periods.find(x => x.id === pid);
+      return p ? `${p.label}${p.startTime ? ' ('+p.startTime+')' : ''}` : pid;
+    });
+    return { elective: e, periods: periodLabels, periodIds: avail, cap: parseInt(e.maxSize) || 25 };
   };
 
-  // Sort electives by availability (most constrained first)
   const sortedElectives = [...electives]
     .filter(e => !e.isElaIntervention && !e.isMathIntervention)
     .sort((a, b) => {
@@ -1413,6 +1416,47 @@ function ConflictsPage({ state, setState }) {
       const bP = (b.availablePeriods || '').split(',').filter(Boolean).length || 99;
       return aP - bP;
     });
+
+  // ── Auto-assign: bump caps as needed based on student ranked choices ────────
+  const autoAssign = () => {
+    setAutoRunning(true);
+    setTimeout(() => {
+      let newElectives = [...state.electives];
+      const resolvedStudents = new Set();
+
+      conflicts.forEach(c => {
+        const grade = parseInt(c.student.grade);
+        for (const choice of (c.choices || [])) {
+          const eIdx = newElectives.findIndex(e =>
+            e.name.toLowerCase() === choice.toLowerCase() &&
+            !e.isElaIntervention && !e.isMathIntervention &&
+            (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade)
+          );
+          if (eIdx === -1) continue;
+          // Bump cap by 1 to fit this student
+          const current = parseInt(newElectives[eIdx].maxSize) || 25;
+          newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(current + 1) };
+          resolvedStudents.add(c.student.student_id);
+          break;
+        }
+      });
+
+      // Re-run scheduler with updated caps
+      const newState = { ...state, electives: newElectives };
+      const result = runScheduler(newState);
+      const run = {
+        id: `run_${Date.now()}`,
+        name: (activeRun?.name || 'Schedule') + '_auto_resolved',
+        date: new Date().toLocaleString(),
+        totalStudents: state.students.length,
+        conflicts: result.conflicts.length,
+        assigned: state.students.length - result.conflicts.length,
+        result
+      };
+      setState(s => ({ ...s, electives: newElectives, runs: [run, ...s.runs] }));
+      setAutoRunning(false);
+    }, 600);
+  };
 
   const reRun = () => {
     const result = runScheduler(state);
@@ -1430,6 +1474,34 @@ function ConflictsPage({ state, setState }) {
 
   return (
     <div>
+      {/* ── Clear & Start Over Modal ── */}
+      {showClearModal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowClearModal(false)}>
+          <div className="modal">
+            <div className="modal-title">Clear All Data</div>
+            <p style={{color:'var(--text2)',fontSize:13,marginBottom:12}}>
+              This will permanently delete all students, classes, electives, run history, and configuration. The school name and period setup will also be cleared.
+            </p>
+            <div className="alert alert-error">⚠ This cannot be undone.</div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowClearModal(false)}>Cancel</button>
+              <button className="btn btn-danger" onClick={() => {
+                setState(() => ({
+                  schoolName: "",
+                  numPeriods: 6,
+                  periods: [],
+                  classes: [],
+                  electives: [],
+                  students: [],
+                  runs: [],
+                }));
+                setShowClearModal(false);
+              }}>Yes, Clear Everything</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <div className="flex-between">
           <div>
@@ -1443,11 +1515,23 @@ function ConflictsPage({ state, setState }) {
               </select>
             )}
             {conflicts.length > 0 && (
-              <button className="btn btn-primary" onClick={reRun}>↺ Re-run Schedule</button>
+              <>
+                <button className="btn btn-secondary" onClick={autoAssign} disabled={autoRunning}>
+                  {autoRunning ? '⏳ Running...' : '⚡ Auto-Assign Conflicts'}
+                </button>
+                <button className="btn btn-primary" onClick={reRun}>↺ Re-run Schedule</button>
+              </>
             )}
+            <button className="btn btn-danger btn-sm" onClick={() => setShowClearModal(true)}>🗑 Clear All Data</button>
           </div>
         </div>
       </div>
+
+      {conflicts.length > 0 && (
+        <div className="alert alert-info" style={{marginBottom:16}}>
+          ℹ <strong>Auto-Assign</strong> will bump class caps by 1 for each conflicted student's top available choice and re-run the scheduler automatically. You can also resolve each conflict manually below.
+        </div>
+      )}
 
       {!activeRun && (
         <div className="empty">
@@ -1466,6 +1550,12 @@ function ConflictsPage({ state, setState }) {
         const info = selectedElective ? getElectiveInfo(selectedElective) : null;
         const capOverride = previewCap[c.student.student_id];
 
+        // Build this student's current schedule for display
+        const studentAssignment = activeRun?.result?.assignments?.find(
+          a => a.student.student_id === c.student.student_id
+        );
+        const usedPeriods = studentAssignment?.schedule || {};
+
         return (
           <div key={i} className="conflict-card">
             <div className="conflict-header">
@@ -1473,17 +1563,62 @@ function ConflictsPage({ state, setState }) {
                 <div className="conflict-name">{c.student.student_name}</div>
                 <div style={{fontSize:11,color:'var(--text3)'}}>{c.student.student_id} · Grade {c.student.grade}{c.student.designation ? ` · ${c.student.designation}` : ""}</div>
               </div>
-              <span className="tag tag-red">Unassigned</span>
+              <span className="tag tag-red">Elective Unassigned</span>
             </div>
-            <div className="conflict-reason">⚠ {c.reason}</div>
+
+            {/* Student's current schedule */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:6}}>Current Schedule</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                {periods.map(p => {
+                  const cls = usedPeriods[p.id];
+                  return (
+                    <div key={p.id} style={{
+                      background: cls ? 'var(--surface2)' : 'rgba(255,107,107,0.08)',
+                      border: `1px solid ${cls ? 'var(--border)' : 'rgba(255,107,107,0.3)'}`,
+                      borderRadius:5, padding:'5px 10px', minWidth:100
+                    }}>
+                      <div style={{fontSize:9,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.06em'}}>{p.label}</div>
+                      <div style={{fontSize:11,color: cls ? 'var(--text)' : 'var(--danger)',marginTop:2}}>
+                        {cls ? cls.replace('[E] ','') : '⚠ Empty'}
+                      </div>
+                      {p.startTime && <div style={{fontSize:9,color:'var(--text3)'}}>{p.startTime}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <div style={{marginBottom:12}}>
               <span style={{fontSize:11,color:'var(--text3)'}}>Submitted choices: </span>
               {(c.choices||[]).map(ch => <span key={ch} className="tag tag-gray" style={{marginRight:2}}>{ch}</span>)}
             </div>
 
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+            {/* Elective period availability reference */}
+            {c.choices && c.choices.length > 0 && (
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:6}}>Elective Period Availability</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {c.choices.slice(0,6).map(ch => {
+                    const inf = getElectiveInfo(ch);
+                    if (!inf) return null;
+                    return (
+                      <div key={ch} style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:5,padding:'5px 10px'}}>
+                        <div style={{fontSize:11,color:'var(--text)',marginBottom:2}}>{ch}</div>
+                        <div style={{fontSize:10,color:'var(--text3)'}}>
+                          {inf.periods.length > 0 ? inf.periods.join(' · ') : 'Any period'}
+                          &nbsp;·&nbsp;Cap: {inf.cap}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div style={{display:'grid',gridTemplateColumns:'1fr 160px',gap:12,marginBottom:12}}>
               <div>
-                <label>Assign elective <span style={{color:'var(--text3)',fontSize:10}}>(sorted by availability — most constrained first)</span></label>
+                <label>Manually assign elective <span style={{color:'var(--text3)',fontSize:10}}>(most constrained first)</span></label>
                 <select
                   value={selectedElective || ""}
                   onChange={e => {
@@ -1494,19 +1629,18 @@ function ConflictsPage({ state, setState }) {
                   <option value="">— Select elective —</option>
                   {sortedElectives.map(e => {
                     const ps = (e.availablePeriods || '').split(',').filter(Boolean);
-                    const label = ps.length === 1 ? ` (${periods.find(p=>p.id===ps[0])?.label || ps[0]} only)`
+                    const label = ps.length === 1
+                      ? ` (${periods.find(p=>p.id===ps[0])?.label || ps[0]} only)`
                       : ps.length > 1 ? ` (${ps.length} periods)` : ' (any period)';
                     return <option key={e.id} value={e.name}>{e.name}{label}</option>;
                   })}
                 </select>
               </div>
-
               {info && (
                 <div>
-                  <label>Adjust class size cap <span style={{color:'var(--text3)',fontSize:10}}>(current: {info.cap})</span></label>
+                  <label>Adjust cap <span style={{color:'var(--text3)',fontSize:10}}>(current: {info.cap})</span></label>
                   <input
-                    type="number"
-                    min="1"
+                    type="number" min="1"
                     value={capOverride !== undefined ? capOverride : info.cap}
                     onChange={e => setPreviewCap(p => ({ ...p, [c.student.student_id]: parseInt(e.target.value) || info.cap }))}
                   />
@@ -1517,16 +1651,14 @@ function ConflictsPage({ state, setState }) {
             {info && (
               <div className="alert alert-info" style={{marginBottom:12}}>
                 <div>
-                  <div style={{marginBottom:4}}>
-                    <strong>{info.elective.name}</strong>
-                    {info.elective.isYearLong ? <span className="tag tag-green" style={{marginLeft:6}}>Year-Long</span> : <span className="tag tag-blue" style={{marginLeft:6}}>Semester</span>}
-                  </div>
-                  <div style={{fontSize:11}}>
-                    Available periods: {info.periods.length > 0 ? info.periods.join(', ') : 'Any period'}
+                  <strong>{info.elective.name}</strong>
+                  {info.elective.isYearLong ? <span className="tag tag-green" style={{marginLeft:6}}>Year-Long</span> : <span className="tag tag-blue" style={{marginLeft:6}}>Semester</span>}
+                  <div style={{fontSize:11,marginTop:4}}>
+                    Periods: {info.periods.length > 0 ? info.periods.join(', ') : 'Any period'}
                     &nbsp;·&nbsp;
-                    Cap: {capOverride !== undefined ? capOverride : info.cap} students
+                    Cap: {capOverride !== undefined ? capOverride : info.cap}
                     {capOverride !== undefined && capOverride !== info.cap && (
-                      <span style={{color:'var(--accent3)',marginLeft:6}}>⚠ Cap will be updated on Apply</span>
+                      <span style={{color:'var(--accent3)',marginLeft:8}}>⚠ Cap will update on Apply</span>
                     )}
                   </div>
                 </div>
@@ -1541,7 +1673,6 @@ function ConflictsPage({ state, setState }) {
                   const override = selectedElective;
                   const newCap = previewCap[c.student.student_id];
                   setState(s => {
-                    // Update elective cap if changed
                     let newElectives = s.electives;
                     if (newCap !== undefined && info) {
                       newElectives = s.electives.map(e =>
