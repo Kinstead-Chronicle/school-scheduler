@@ -420,143 +420,270 @@ const DEFAULT_STATE = {
 };
 
 // ─── SCHEDULING ENGINE ───────────────────────────────────────────────────────
+//
+// Strategy: constraint-based auto-scheduling
+//
+// The engine figures out period assignments automatically based on how
+// constrained each class/student is. Most constrained scheduled first.
+//
+// Pass order:
+//   1. Lock single-period classes into their fixed period
+//   2. Lock PEAKS blocks (2 consecutive periods per grade)
+//   3. ELA/Math intervention students (go 1st period per school rule)
+//   4. Students with single-period-only class requirements (Biology, Geometry, Spanish 1)
+//   5. Remaining designated students (Accelerated, ESE)
+//   6. General population — most constrained elective choices first
+
 function runScheduler(state) {
   const { periods, classes, electives, students } = state;
   if (!students.length || !periods.length) return { assignments: [], conflicts: [] };
 
-  // Build period availability map per elective
-  const electiveMap = {};
-  electives.forEach(e => { electiveMap[e.id] = e; });
+  const periodIds = periods.map(p => p.id);
 
-  // Build class cap map
-  const classCaps = {};
-  classes.forEach(c => { classCaps[c.id] = parseInt(c.maxSize) || 25; });
-  electives.forEach(e => { classCaps[e.id] = parseInt(e.maxSize) || 25; });
+  // ── Build constraint maps ──────────────────────────────────────────────────
 
-  // Track enrollment counts per class per period
-  const enrollment = {}; // key: `${classId}_${periodId}`
-  const enrollKey = (cid, pid) => `${cid}_${pid}`;
+  // Classes that are locked to a single period
+  const singlePeriodClasses = new Set();
+  const classPeriodMap = {}; // classId -> [periodIds]
+  classes.forEach(c => {
+    const ps = (c.periods || '').split(',').map(p => p.trim()).filter(Boolean);
+    classPeriodMap[c.id] = ps.length ? ps : [...periodIds];
+    if (ps.length === 1) singlePeriodClasses.add(c.id);
+  });
 
+  const electivePeriodMap = {}; // electiveId -> [periodIds]
+  electives.forEach(e => {
+    const ps = (e.availablePeriods || '').split(',').map(p => p.trim()).filter(Boolean);
+    electivePeriodMap[e.id] = ps.length ? ps : [...periodIds];
+  });
+
+  // Enrollment tracker: classId_periodId -> count
+  const enrollment = {};
+  const enrollKey = (cid, pid) => `${cid}__${pid}`;
   const getEnroll = (cid, pid) => enrollment[enrollKey(cid, pid)] || 0;
   const addEnroll = (cid, pid) => { enrollment[enrollKey(cid, pid)] = getEnroll(cid, pid) + 1; };
+  const getCap = (item) => parseInt(item.maxSize) || 25;
 
-  const assignments = [];
   const conflicts = [];
 
-  // Sort: designated students first
-  const DESIGNATION_PRIORITY = ["ESE", "ELA Intervention", "Math Intervention", "Accelerated"];
-  const getPriority = (student) => {
-    const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
-    if (!desigs.length) return 999;
-    const min = Math.min(...desigs.map(d => {
-      const idx = DESIGNATION_PRIORITY.indexOf(d);
-      return idx === -1 ? 998 : idx;
-    }));
-    return min;
+  // ── Helper: find open period for a class ──────────────────────────────────
+  const findOpenPeriod = (classItem, usedPeriods, availablePeriods) => {
+    const candidates = availablePeriods || classPeriodMap[classItem.id] || periodIds;
+    return candidates.find(pid =>
+      !usedPeriods.has(pid) &&
+      getEnroll(classItem.id, pid) < getCap(classItem)
+    ) || null;
   };
 
-  const sorted = [...students].sort((a, b) => getPriority(a) - getPriority(b));
-
-  sorted.forEach(student => {
+  // ── Compute student constraint score ──────────────────────────────────────
+  // Higher score = more constrained = schedule first
+  const getConstraintScore = (student) => {
+    let score = 0;
     const grade = parseInt(student.grade);
-    const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
-    const assignment = { student, schedule: {}, elective: null, conflicts: [] };
+    const desigs = (student.designation || '').split('|').map(d => d.trim()).filter(Boolean);
 
-    // Assign standard classes by grade
+    // Intervention students: highest priority
+    if (desigs.includes('ELA Intervention') || desigs.includes('Math Intervention')) score += 1000;
+
+    // Single-period-only class requirements for this student's grade
     const gradeClasses = classes.filter(c =>
-      !c.gradeLevel || parseInt(c.gradeLevel) === grade ||
-      c.gradeLevel === "all"
+      c.gradeLevel === String(grade) || c.gradeLevel === 'all' || !c.gradeLevel
     );
+    gradeClasses.forEach(c => {
+      const ps = classPeriodMap[c.id] || [];
+      if (ps.length === 1) score += 500; // locked to one period
+      else if (ps.length <= 2) score += 100;
+    });
 
-    // Track which periods are used
+    // Constrained elective choices
+    const choices = getChoices(student);
+    choices.forEach(name => {
+      const e = electives.find(el => el.name.toLowerCase() === name.toLowerCase());
+      if (e) {
+        const ps = electivePeriodMap[e.id] || [];
+        if (ps.length === 1) score += 200;
+        else if (ps.length <= 2) score += 50;
+      }
+    });
+
+    // Other designations
+    if (desigs.includes('ESE')) score += 300;
+    if (desigs.includes('Accelerated')) score += 200;
+
+    return score;
+  };
+
+  const getChoices = (student) => {
+    const choices = [];
+    for (let i = 1; i <= 12; i++) {
+      const v = student[`choice_${i}`];
+      if (v && v.trim()) choices.push(v.trim());
+    }
+    return choices;
+  };
+
+  // ── Sort students by constraint score descending ───────────────────────────
+  const sorted = [...students].sort((a, b) => getConstraintScore(b) - getConstraintScore(a));
+
+  // ── Schedule each student ──────────────────────────────────────────────────
+  const assignments = sorted.map(student => {
+    const grade = parseInt(student.grade);
+    const desigs = (student.designation || '').split('|').map(d => d.trim()).filter(Boolean);
+    const schedule = {}; // periodId -> className
     const usedPeriods = new Set();
 
-    // Handle PEAKS block (two consecutive periods)
+    // Get all standard classes for this student's grade
+    const gradeClasses = classes.filter(c =>
+      c.gradeLevel === String(grade) || c.gradeLevel === 'all' || !c.gradeLevel
+    );
+
+    // ── Step 1: Assign PEAKS block first (most rigid — 2 consecutive periods) ─
     const peaksClass = gradeClasses.find(c => c.isPeaks);
     if (peaksClass) {
-      const peaksPeriods = peaksClass.periods ? peaksClass.periods.split(",").map(p => p.trim()) : [];
-      if (peaksPeriods.length >= 2) {
-        peaksPeriods.forEach(pid => {
-          assignment.schedule[pid] = peaksClass.name;
-          usedPeriods.add(pid);
-          addEnroll(peaksClass.id, pid);
-        });
+      const peaksPeriods = (peaksClass.periods || '').split(',').map(p => p.trim()).filter(Boolean);
+      // Find two consecutive available periods
+      let placed = false;
+      for (let i = 0; i < periodIds.length - 1; i++) {
+        const p1 = periodIds[i], p2 = periodIds[i + 1];
+        if (
+          !usedPeriods.has(p1) && !usedPeriods.has(p2) &&
+          (peaksPeriods.length === 0 || (peaksPeriods.includes(p1) && peaksPeriods.includes(p2))) &&
+          getEnroll(peaksClass.id, p1) < getCap(peaksClass) &&
+          getEnroll(peaksClass.id, p2) < getCap(peaksClass)
+        ) {
+          schedule[p1] = peaksClass.name;
+          schedule[p2] = peaksClass.name + ' (cont.)';
+          usedPeriods.add(p1);
+          usedPeriods.add(p2);
+          addEnroll(peaksClass.id, p1);
+          addEnroll(peaksClass.id, p2);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        // Fallback: place in any two open periods
+        const openPairs = [];
+        for (let i = 0; i < periodIds.length - 1; i++) {
+          if (!usedPeriods.has(periodIds[i]) && !usedPeriods.has(periodIds[i+1])) {
+            openPairs.push([periodIds[i], periodIds[i+1]]);
+          }
+        }
+        if (openPairs.length > 0) {
+          const [p1, p2] = openPairs[0];
+          schedule[p1] = peaksClass.name;
+          schedule[p2] = peaksClass.name + ' (cont.)';
+          usedPeriods.add(p1); usedPeriods.add(p2);
+          addEnroll(peaksClass.id, p1); addEnroll(peaksClass.id, p2);
+        }
       }
     }
 
-    // Assign other standard classes
-    gradeClasses.filter(c => !c.isPeaks).forEach(cls => {
-      const availPeriods = (cls.periods || "").split(",").map(p => p.trim()).filter(Boolean);
-      const open = availPeriods.find(pid => !usedPeriods.has(pid));
+    // ── Step 2: Assign intervention if designated ──────────────────────────
+    if (desigs.includes('ELA Intervention')) {
+      const intClass = electives.find(e => e.isElaIntervention);
+      if (intClass) {
+        // School rule: intervention goes 1st period when possible
+        const preferredPeriod = periodIds[0];
+        if (!usedPeriods.has(preferredPeriod) && getEnroll(intClass.id, preferredPeriod) < (parseInt(intClass.maxSize) || 15)) {
+          schedule[preferredPeriod] = intClass.name;
+          usedPeriods.add(preferredPeriod);
+          addEnroll(intClass.id, preferredPeriod);
+        } else {
+          // Fall back to any open period
+          const avail = (electivePeriodMap[intClass.id] || periodIds);
+          const open = avail.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
+          if (open) {
+            schedule[open] = intClass.name;
+            usedPeriods.add(open);
+            addEnroll(intClass.id, open);
+          }
+        }
+      }
+    }
+
+    if (desigs.includes('Math Intervention')) {
+      const intClass = electives.find(e => e.isMathIntervention);
+      if (intClass) {
+        const preferredPeriod = periodIds[0];
+        if (!usedPeriods.has(preferredPeriod) && getEnroll(intClass.id, preferredPeriod) < (parseInt(intClass.maxSize) || 15)) {
+          schedule[preferredPeriod] = intClass.name;
+          usedPeriods.add(preferredPeriod);
+          addEnroll(intClass.id, preferredPeriod);
+        } else {
+          const avail = (electivePeriodMap[intClass.id] || periodIds);
+          const open = avail.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
+          if (open) {
+            schedule[open] = intClass.name;
+            usedPeriods.add(open);
+            addEnroll(intClass.id, open);
+          }
+        }
+      }
+    }
+
+    // ── Step 3: Assign single-period-locked standard classes ──────────────
+    const singleLocked = gradeClasses
+      .filter(c => !c.isPeaks && singlePeriodClasses.has(c.id))
+      .sort((a, b) => (classPeriodMap[a.id]||[]).length - (classPeriodMap[b.id]||[]).length);
+
+    singleLocked.forEach(cls => {
+      const open = findOpenPeriod(cls, usedPeriods, classPeriodMap[cls.id]);
       if (open) {
-        assignment.schedule[open] = cls.name;
+        schedule[open] = cls.name;
         usedPeriods.add(open);
         addEnroll(cls.id, open);
       }
     });
 
-    // Assign intervention classes if designated
-    if (desigs.includes("ELA Intervention")) {
-      const intClass = electives.find(e => e.name === "ELA Intervention" || e.isElaIntervention);
-      if (intClass) {
-        const availPeriods = (intClass.availablePeriods || "").split(",").map(p => p.trim()).filter(Boolean);
-        const open = availPeriods.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
-        if (open) {
-          assignment.schedule[open] = intClass.name;
-          usedPeriods.add(open);
-          addEnroll(intClass.id, open);
-        }
-      }
-    }
-    if (desigs.includes("Math Intervention")) {
-      const intClass = electives.find(e => e.name === "Math Intervention" || e.isMathIntervention);
-      if (intClass) {
-        const availPeriods = (intClass.availablePeriods || "").split(",").map(p => p.trim()).filter(Boolean);
-        const open = availPeriods.find(pid => !usedPeriods.has(pid) && getEnroll(intClass.id, pid) < (parseInt(intClass.maxSize) || 15));
-        if (open) {
-          assignment.schedule[open] = intClass.name;
-          usedPeriods.add(open);
-          addEnroll(intClass.id, open);
-        }
-      }
-    }
+    // ── Step 4: Assign remaining standard classes (most constrained first) ─
+    const remaining = gradeClasses
+      .filter(c => !c.isPeaks && !singlePeriodClasses.has(c.id))
+      .sort((a, b) => (classPeriodMap[a.id]||periodIds).length - (classPeriodMap[b.id]||periodIds).length);
 
-    // Assign elective by ranked preference
-    const choices = [];
-    for (let i = 1; i <= 12; i++) {
-      const val = student[`choice_${i}`];
-      if (val && val.trim()) choices.push(val.trim());
-    }
+    remaining.forEach(cls => {
+      const open = findOpenPeriod(cls, usedPeriods, classPeriodMap[cls.id]);
+      if (open) {
+        schedule[open] = cls.name;
+        usedPeriods.add(open);
+        addEnroll(cls.id, open);
+      }
+    });
 
-    let electiveAssigned = false;
+    // ── Step 5: Assign elective by ranked preference ───────────────────────
+    const choices = getChoices(student);
+    let electiveAssigned = null;
+
     for (const choice of choices) {
-      const elective = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
+      const elective = electives.find(e =>
+        e.name.toLowerCase() === choice.toLowerCase() &&
+        !e.isElaIntervention && !e.isMathIntervention
+      );
       if (!elective) continue;
-      // Check grade restriction
+      // Grade restriction check
       if (elective.gradeRestriction && parseInt(elective.gradeRestriction) !== grade) continue;
-      const availPeriods = (elective.availablePeriods || "").split(",").map(p => p.trim()).filter(Boolean);
-      const open = availPeriods.find(pid =>
+
+      const avail = electivePeriodMap[elective.id] || periodIds;
+      const open = avail.find(pid =>
         !usedPeriods.has(pid) &&
-        getEnroll(elective.id, pid) < (parseInt(elective.maxSize) || 25)
+        getEnroll(elective.id, pid) < getCap(elective)
       );
       if (open) {
-        assignment.schedule[open] = `[E] ${elective.name}`;
-        assignment.elective = elective.name;
+        schedule[open] = `[E] ${elective.name}`;
+        electiveAssigned = elective.name;
         usedPeriods.add(open);
         addEnroll(elective.id, open);
-        electiveAssigned = true;
         break;
       }
     }
 
     if (!electiveAssigned && choices.length > 0) {
-      assignment.conflicts.push(`All ${choices.length} elective choices unavailable or full`);
-      conflicts.push({ student, reason: `All elective choices exhausted`, choices });
-    } else if (!electiveAssigned && choices.length === 0) {
-      assignment.conflicts.push("No elective choices provided");
+      conflicts.push({ student, reason: 'All elective choices exhausted or unavailable', choices });
+    } else if (!electiveAssigned) {
+      conflicts.push({ student, reason: 'No elective choices provided', choices: [] });
     }
 
-    assignments.push(assignment);
+    return { student, schedule, elective: electiveAssigned, conflicts: electiveAssigned ? [] : ['Elective unassigned'] };
   });
 
   return { assignments, conflicts };
@@ -929,7 +1056,7 @@ function ClassesPage({ state, setState }) {
               )}
 
               <div>
-                <label style={{marginBottom:8}}>Available Periods</label>
+                <label style={{marginBottom:8}}>Period Hints <span style={{color:'var(--text3)',fontWeight:'normal'}}>(optional — engine auto-assigns if blank)</span></label>
                 <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
                   {periodOptions.map(p => {
                     const key = tab === "standard" ? "periods" : "availablePeriods";
