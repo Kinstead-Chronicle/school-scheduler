@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.1.9";
+const APP_VERSION = "1.2.0";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -314,9 +314,9 @@ function runScheduler(state) {
       const avail = electivePMap[el.id] || pids;
       const openSlots = avail.filter(p => !used.has(p) && canAssign(el, p));
       if (!openSlots.length) return false;
-      // preferBusy: pick slot with most enrollment to concentrate into fewer sections
+      // preferBusy: use getBestSlot to concentrate into existing sections
       const open = preferBusy
-        ? openSlots.sort((a, b) => getE(el.id, b) - getE(el.id, a))[0]
+        ? getBestSlot(el, openSlots)
         : openSlots[0];
       schedule[open] = "[E] " + el.name;
       assigned.push(el.name);
@@ -327,9 +327,28 @@ function runScheduler(state) {
     };
 
     const getTotalEnroll = el => pids.reduce((s, p) => s + getE(el.id, p), 0);
+    
+    // An elective needs minimum help if ANY active slot is below min
+    // OR if it has fewer total students than its minimum
     const isUnderMin = el => {
       const mn = minSize(el);
-      return mn > 0 && getTotalEnroll(el) < mn;
+      if (mn <= 0) return false;
+      const total = getTotalEnroll(el);
+      if (total >= mn) return false; // already met total minimum
+      return true;
+    };
+    
+    // Get the best period slot to assign for an under-minimum elective
+    // Prefer the slot with most enrollment (concentrate into best section first)
+    const getBestSlot = (el, openSlots) => {
+      const mn = minSize(el);
+      if (mn <= 0 || openSlots.length <= 1) return openSlots[0];
+      // Find slots that already have students (prefer building up existing sections)
+      const activeOpenSlots = openSlots.filter(p => getE(el.id, p) > 0);
+      if (activeOpenSlots.length > 0) {
+        return activeOpenSlots.sort((a, b) => getE(el.id, b) - getE(el.id, a))[0];
+      }
+      return openSlots[0];
     };
 
     // Pass 1: prioritize choices that are below minimum (concentrate students there)
