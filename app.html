@@ -603,8 +603,8 @@ function ClassesPage({ state, setState }) {
             React.createElement("thead", null, React.createElement("tr", null,
               React.createElement("th", null, "Name"),
               tab === "standard" ? React.createElement("th", null, "Grade") : React.createElement("th", null, "Type"),
-              tab === "standard" ? React.createElement("th", null, "Category") : React.createElement("th", null, "Cap"),
-              tab === "standard" ? React.createElement("th", null, "Max Size") : React.createElement("th", null, ""),
+              tab === "standard" ? React.createElement("th", null, "Category") : React.createElement("th", null, "Max"),
+              tab === "standard" ? React.createElement("th", null, "Max Size") : React.createElement("th", null, "Min"),
               tab === "standard" ? React.createElement("th", null, "Flags") : React.createElement("th", null, ""),
               React.createElement("th", null, "Period Hints"),
               React.createElement("th", null)
@@ -622,10 +622,20 @@ function ClassesPage({ state, setState }) {
                     : React.createElement("td", null, item.isElaIntervention || item.isMathIntervention ? React.createElement("span", { className: "tag tag-red" }, "Intervention") : item.isYearLong ? React.createElement("span", { className: "tag tag-green" }, "Year-Long") : React.createElement("span", { className: "tag tag-blue" }, "Semester")),
                   tab === "standard"
                     ? React.createElement("td", null, item.category ? React.createElement("span", { className: "tag tag-blue" }, item.category) : React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "-"))
-                    : React.createElement("td", null, item.maxSize ? item.maxSize : React.createElement("span", { style: { color: "var(--text3)" } }, electiveDefaults.maxSize || "25") + " (default)"),
+                    : React.createElement("td", null,
+                      item.maxSize
+                        ? React.createElement("span", null, item.maxSize)
+                        : React.createElement("span", { style: { color: "var(--text3)" } }, (electiveDefaults.maxSize || "25") + " (def)")
+                    ),
                   tab === "standard"
                     ? React.createElement("td", null, React.createElement("span", { style: { fontSize: 11, color: "var(--text2)" } }, item.maxSize || "25"))
-                    : React.createElement("td", null),
+                    : React.createElement("td", null,
+                        item.minSize
+                          ? React.createElement("span", { style: { fontSize: 11 } }, item.minSize)
+                          : electiveDefaults.minSize
+                            ? React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, electiveDefaults.minSize + " (def)")
+                            : React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "-")
+                      ),
                   tab === "standard"
                     ? React.createElement("td", null,
                         peaksPairs.some(p => p.classAId === item.id || p.classBId === item.id) && React.createElement("span", { className: "tag tag-yellow" }, "PEAKS")
@@ -844,7 +854,7 @@ function SchedulePage({ state, setState }) {
           React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Total"), React.createElement("div", { className: "stat-value" }, lastRun.totalStudents)),
           React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Assigned"), React.createElement("div", { className: "stat-value", style: { color: "var(--accent)" } }, lastRun.assigned)),
           React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Conflicts"), React.createElement("div", { className: "stat-value", style: { color: lastRun.conflicts > 0 ? "var(--danger)" : "var(--accent)" } }, lastRun.conflicts)),
-          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Rate"), React.createElement("div", { className: "stat-value" }, Math.round((lastRun.assigned / lastRun.totalStudents) * 100) + "%"))
+          React.createElement("div", { className: "stat" }, React.createElement("div", { className: "stat-label" }, "Below Min"), React.createElement("div", { className: "stat-value", style: { color: (lastRun.underMin || 0) > 0 ? "var(--accent3)" : "var(--accent)" } }, lastRun.underMin || 0))
         ),
         React.createElement("button", { className: "btn btn-primary", onClick: () => exportToExcel(lastRun.result, state, lastRun.name) }, "Export to Excel")
       ),
@@ -858,6 +868,7 @@ function SchedulePage({ state, setState }) {
             ),
             React.createElement("div", { className: "flex" },
               r.conflicts > 0 ? React.createElement("span", { className: "tag tag-red" }, r.conflicts + " conflicts") : React.createElement("span", { className: "tag tag-green" }, "Clean"),
+              r.underMin > 0 && React.createElement("span", { className: "tag tag-yellow" }, r.underMin + " below min"),
               React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, Math.round((r.assigned / r.totalStudents) * 100) + "%"),
               React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => exportToExcel(r.result, state, r.name) }, "Export"),
               React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => del(r.id) }, "Delete")
