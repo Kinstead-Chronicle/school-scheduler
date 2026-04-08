@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.2";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -177,10 +177,21 @@ function runScheduler(state) {
 
   // Can this class accept another student in this period?
   const canAssign = (item, pid) => {
-    // Must be under per-period cap
-    if (getE(item.id, pid) >= maxSize(item)) return false;
-    // If this is a new period slot, must be under maxPeriods
-    if (!getSlots(item.id).has(pid) && getSlots(item.id).size >= maxPeriods(item)) return false;
+    const ms = maxSize(item);
+    const slots = getSlots(item.id);
+    // ALWAYS enforce per-period cap first
+    if (getE(item.id, pid) >= ms) return false;
+    // If this is an existing slot, allow (cap already checked above)
+    if (slots.has(pid)) return true;
+    // This is a NEW slot - check maxPeriods limit
+    if (slots.size >= maxPeriods(item)) return false;
+    // For ELECTIVES only: don't open a new slot while existing slots still have room
+    // This concentrates students into fewer, fuller sections
+    if (isElective(item.id)) {
+      const existingSlotsFull = slots.size === 0 || [...slots].every(p => getE(item.id, p) >= ms);
+      return existingSlotsFull;
+    }
+    // Standard classes: open new slots freely (each section is a separate class)
     return true;
   };
 
@@ -366,11 +377,41 @@ function runScheduler(state) {
     }
 
     if (assigned.length === 0 && choices.length > 0) {
-      conflicts.push({ student, reason: "No elective choices could be assigned", choices });
+      // Build a detailed reason explaining WHY each choice failed
+      const reasons = choices.slice(0, 5).map(choice => {
+        const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
+        if (!el) return choice + " (not found)";
+        if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return choice + " (grade restricted)";
+        const avail = electivePMap[el.id] || pids;
+        const openSlots = avail.filter(p => !used.has(p));
+        if (!openSlots.length) return choice + " (no open period in student schedule)";
+        const capFull = openSlots.every(p => getE(el.id, p) >= maxSize(el));
+        if (capFull) return choice + " (class full)";
+        const slotsFull = getSlots(el.id).size >= maxPeriods(el) && !openSlots.some(p => getSlots(el.id).has(p));
+        if (slotsFull) return choice + " (max periods reached)";
+        return choice + " (unavailable)";
+      });
+      conflicts.push({ student, reason: "All choices blocked: " + reasons.join("; "), choices });
     } else if (assigned.length < NUM_ELECTIVES && choices.length > 0) {
-      conflicts.push({ student, reason: "Only " + assigned.length + " of 2 electives assigned", choices, partial: true, assigned });
+      const remaining = choices.filter(c => !assigned.map(a => a.toLowerCase()).includes(c.toLowerCase()));
+      const reasons = remaining.slice(0, 3).map(choice => {
+        const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
+        if (!el) return choice + " (not found)";
+        if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return choice + " (grade restricted)";
+        const avail = electivePMap[el.id] || pids;
+        const openSlots = avail.filter(p => !used.has(p));
+        if (!openSlots.length) return choice + " (no open period)";
+        const capFull = openSlots.every(p => getE(el.id, p) >= maxSize(el));
+        if (capFull) return choice + " (class full)";
+        return choice + " (unavailable)";
+      });
+      conflicts.push({
+        student,
+        reason: "Got " + assigned.join(", ") + " — 2nd elective blocked: " + reasons.join("; "),
+        choices, partial: true, assigned
+      });
     } else if (choices.length === 0) {
-      conflicts.push({ student, reason: "No elective choices provided", choices: [] });
+      conflicts.push({ student, reason: "No elective choices provided in CSV", choices: [] });
     }
 
     return { student, schedule, elective: assigned[0] || null, elective2: assigned[1] || null, electives: assigned, conflicts: assigned.length < NUM_ELECTIVES ? ["partial"] : [] };
