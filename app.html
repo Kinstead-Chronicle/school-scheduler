@@ -152,7 +152,11 @@ function runScheduler(state) {
     if (desigs.includes("Accelerated")) sc += 200;
     const gradePair = peaksPairs.find(pair => pair.gradeLevel === String(grade));
     if (gradePair) sc += 600;
-    classes.filter(c => c.gradeLevel === String(grade) || c.gradeLevel === "all" || !c.gradeLevel).forEach(c => {
+    classes.filter(c => {
+      if (c.grades && c.grades.length > 0) return c.grades.includes(String(grade));
+      if (c.gradeLevel && c.gradeLevel !== "all") return c.gradeLevel === String(grade);
+      return true;
+    }).forEach(c => {
       const ps = classPMap[c.id] || [];
       if (ps.length === 1) sc += 500;
       else if (ps.length <= 2) sc += 100;
@@ -173,7 +177,13 @@ function runScheduler(state) {
     const schedule = {};
     const used = new Set();
     let standardCount = 0;
-    const gradeClasses = classes.filter(c => c.gradeLevel === String(grade) || c.gradeLevel === "all" || !c.gradeLevel);
+    // Support both legacy gradeLevel and new grades array
+    const matchesGrade = (c) => {
+      if (c.grades && c.grades.length > 0) return c.grades.includes(String(grade));
+      if (c.gradeLevel && c.gradeLevel !== "all") return c.gradeLevel === String(grade);
+      return true; // "all" or no grade set
+    };
+    const gradeClasses = classes.filter(matchesGrade);
     const pairedClassIds = new Set(peaksPairs.flatMap(pair => [pair.classAId, pair.classBId]));
 
     // Step 1: PEAKS pair (counts as 2 standard slots)
@@ -437,16 +447,19 @@ function ClassesPage({ state, setState }) {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const [pairForm, setPairForm] = useState({ gradeLevel: "6", classAId: "", classBId: "" });
-  const openAdd = () => { setEditing(null); setForm(tab === "standard" ? { name: "", gradeLevel: "all", periods: [] } : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }); setShowModal(true); };
+  const openAdd = () => { setEditing(null); setForm(tab === "standard" ? { name: "", grades: ["6","7","8"], periods: [] } : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }); setShowModal(true); };
   const openEdit = item => {
     setEditing(item.id);
-    if (tab === "standard") setForm({ ...item, periods: (item.periods || "").split(",").map(x => x.trim()).filter(Boolean) });
+    if (tab === "standard") {
+      let grades = item.grades || (item.gradeLevel && item.gradeLevel !== "all" ? [item.gradeLevel] : ["6","7","8"]);
+      setForm({ ...item, grades, periods: (item.periods || "").split(",").map(x => x.trim()).filter(Boolean) });
+    }
     else setForm({ ...item, availablePeriods: (item.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean) });
     setShowModal(true);
   };
   const save = () => {
     if (tab === "standard") {
-      const item = { ...form, id: editing || "cls_" + Date.now(), periods: (form.periods || []).join(",") };
+      const item = { ...form, id: editing || "cls_" + Date.now(), periods: (form.periods || []).join(","), grades: form.grades || ["6","7","8"] };
       setState(s => ({ ...s, classes: editing ? s.classes.map(c => c.id === editing ? item : c) : [...s.classes, item] }));
     } else {
       const item = { ...form, id: editing || "elec_" + Date.now(), availablePeriods: (form.availablePeriods || []).join(",") };
@@ -504,14 +517,21 @@ function ClassesPage({ state, setState }) {
               React.createElement("label", null, "ELA Class"),
               React.createElement("select", { value: pairForm.classAId, onChange: e => setPairForm(f => ({ ...f, classAId: e.target.value })) },
                 React.createElement("option", { value: "" }, "-- Select class --"),
-                classes.filter(c => c.gradeLevel === pairForm.gradeLevel || c.gradeLevel === "all").map(c => React.createElement("option", { key: c.id, value: c.id }, c.name))
+                classes.filter(c => {
+                  if (c.grades && c.grades.length > 0) return c.grades.includes(pairForm.gradeLevel);
+                  if (c.gradeLevel && c.gradeLevel !== "all") return c.gradeLevel === pairForm.gradeLevel;
+                  return true;
+                }).map(c => React.createElement("option", { key: c.id, value: c.id }, c.name))
               )
             ),
             React.createElement("div", null,
               React.createElement("label", null, "History Class"),
               React.createElement("select", { value: pairForm.classBId, onChange: e => setPairForm(f => ({ ...f, classBId: e.target.value })) },
                 React.createElement("option", { value: "" }, "-- Select class --"),
-                classes.filter(c => (c.gradeLevel === pairForm.gradeLevel || c.gradeLevel === "all") && c.id !== pairForm.classAId).map(c => React.createElement("option", { key: c.id, value: c.id }, c.name))
+                classes.filter(c => {
+                  const matchG = c.grades && c.grades.length > 0 ? c.grades.includes(pairForm.gradeLevel) : (c.gradeLevel === pairForm.gradeLevel || c.gradeLevel === "all" || !c.gradeLevel);
+                  return matchG && c.id !== pairForm.classAId;
+                }).map(c => React.createElement("option", { key: c.id, value: c.id }, c.name))
               )
             ),
             React.createElement("button", { className: "btn btn-primary", onClick: addPair, disabled: !pairForm.classAId || !pairForm.classBId }, "Add Pair")
@@ -555,7 +575,11 @@ function ClassesPage({ state, setState }) {
                 React.createElement("tr", { key: item.id },
                   React.createElement("td", { style: { color: "var(--text)" } }, item.name),
                   tab === "standard"
-                    ? React.createElement("td", null, item.gradeLevel === "all" ? React.createElement("span", { className: "tag tag-gray" }, "All") : React.createElement("span", { className: "tag tag-blue" }, item.gradeLevel + "th"))
+                    ? React.createElement("td", null,
+                        (item.grades && item.grades.length < 3)
+                          ? item.grades.map(g => React.createElement("span", { key: g, className: "tag tag-blue" }, g + "th"))
+                          : React.createElement("span", { className: "tag tag-gray" }, "All")
+                      )
                     : React.createElement("td", null, item.isElaIntervention || item.isMathIntervention ? React.createElement("span", { className: "tag tag-red" }, "Intervention") : item.isYearLong ? React.createElement("span", { className: "tag tag-green" }, "Year-Long") : React.createElement("span", { className: "tag tag-blue" }, "Semester")),
                   tab === "standard"
                     ? React.createElement("td", null, item.category ? React.createElement("span", { className: "tag tag-blue" }, item.category) : React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "-"))
@@ -595,11 +619,15 @@ function ClassesPage({ state, setState }) {
             tab === "standard" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 120px", gap: 12 } },
               React.createElement("div", null,
                 React.createElement("label", null, "Grade Level"),
-                React.createElement("select", { value: form.gradeLevel || "all", onChange: e => setForm(f => ({ ...f, gradeLevel: e.target.value })) },
-                  React.createElement("option", { value: "all" }, "All Grades"),
-                  React.createElement("option", { value: "6" }, "6th Grade"),
-                  React.createElement("option", { value: "7" }, "7th Grade"),
-                  React.createElement("option", { value: "8" }, "8th Grade")
+                React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 } },
+                  React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 0, fontSize: 12 } },
+                    React.createElement("input", { type: "checkbox", style: { width: "auto" }, checked: (form.grades || ["6","7","8"]).length === 3, onChange: e => setForm(f => ({ ...f, grades: e.target.checked ? ["6","7","8"] : [] })) }),
+                    "All"
+                  ),
+                  ["6","7","8"].map(g => React.createElement("label", { key: g, style: { display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 0, fontSize: 12 } },
+                    React.createElement("input", { type: "checkbox", style: { width: "auto" }, checked: (form.grades || ["6","7","8"]).includes(g), onChange: e => setForm(f => ({ ...f, grades: e.target.checked ? [...(f.grades || ["6","7","8"]), g] : (f.grades || ["6","7","8"]).filter(x => x !== g) })) }),
+                    g + "th"
+                  ))
                 )
               ),
               React.createElement("div", null,
@@ -1063,7 +1091,12 @@ function App() {
     setStateRaw(prev => { const next = typeof updater === "function" ? updater(prev) : updater; save(next); return next; });
   }, []);
   useEffect(() => {
-    fetch(VERSION_URL + "?v=" + Date.now()).then(r => r.json()).then(d => { if (d.version && d.version !== APP_VERSION) setUpdateAvail(true); }).catch(() => {});
+    const dismissed = sessionStorage.getItem("update_dismissed");
+    if (dismissed === APP_VERSION) return;
+    fetch(VERSION_URL + "?v=" + Date.now())
+      .then(r => r.json())
+      .then(d => { if (d.version && d.version !== APP_VERSION) setUpdateAvail(true); })
+      .catch(() => {});
   }, []);
   const STEPS = ["setup", "classes", "students", "schedule", "conflicts"];
   const LABELS = { setup: "School Setup", classes: "Classes & Electives", students: "Students", schedule: "Run Schedule", conflicts: "Conflicts" };
@@ -1081,8 +1114,8 @@ function App() {
     React.createElement("div", null,
       updateAvail && React.createElement("div", { className: "update-bar" },
         React.createElement("span", null, "A new version is available"),
-        React.createElement("button", { onClick: () => { window.location.reload(true); setUpdateAvail(false); } }, "Update Now"),
-        React.createElement("button", { onClick: () => setUpdateAvail(false), style: { background: "transparent", color: "#1a1a00", border: "none", cursor: "pointer", fontSize: 14 } }, "x")
+        React.createElement("button", { onClick: () => { sessionStorage.setItem("update_dismissed", APP_VERSION); window.location.reload(true); } }, "Update Now"),
+        React.createElement("button", { onClick: () => { sessionStorage.setItem("update_dismissed", APP_VERSION); setUpdateAvail(false); }, style: { background: "transparent", color: "#1a1a00", border: "none", cursor: "pointer", fontSize: 14 } }, "x")
       ),
       React.createElement("div", { className: "shell" },
         React.createElement("div", { className: "sidebar" },
