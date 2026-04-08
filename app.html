@@ -95,6 +95,7 @@ tr:last-child td { border-bottom: none; }
 .conflict-card { background: var(--surface); border: 1px solid rgba(255,107,107,0.3); border-radius: 8px; padding: 16px; margin-bottom: 10px; }
 .period-pill { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; padding: 5px 10px; min-width: 90px; }
 .period-pill-empty { border-color: rgba(255,107,107,0.3); background: rgba(255,107,107,0.05); }
+.progress-bar { height: 4px; background: var(--surface3); border-radius: 2px; overflow: hidden; }
 .next-bar { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -267,7 +268,56 @@ function runScheduler(state) {
     return { student, schedule, elective: assignedElectives[0] || null, elective2: assignedElectives[1] || null, electives: assignedElectives, conflicts: assignedElectives.length < NUM_ELECTIVES ? ["partial"] : [] };
   });
 
-  return { assignments, conflicts };
+  // Post-scheduling: check minimum class sizes
+  const allItems = [...classes, ...electives];
+  const underMin = [];
+  allItems.forEach(item => {
+    const minSize = parseInt(item.minSize);
+    if (!minSize || minSize <= 0) return;
+    // Count enrollment across all periods for this class
+    let totalEnrolled = 0;
+    const periodEnrollments = {};
+    pids.forEach(pid => {
+      const e = getE(item.id, pid);
+      if (e > 0) { totalEnrolled += e; periodEnrollments[pid] = e; }
+    });
+    if (totalEnrolled > 0 && totalEnrolled < minSize) {
+      underMin.push({ item, totalEnrolled, minSize, periodEnrollments });
+      // If action is reassign: move students from this class to their next choice
+      if (item.minAction === "reassign") {
+        // Find all students assigned to this class and try to reassign them
+        assignments.forEach(a => {
+          const periodWithClass = Object.entries(a.schedule).find(([pid, cls]) => cls === item.name || cls === "[E] " + item.name);
+          if (!periodWithClass) return;
+          const [assignedPid] = periodWithClass;
+          // Try next choices
+          const choices = getChoices(a.student);
+          const currentIdx = choices.findIndex(c => c.toLowerCase() === item.name.toLowerCase());
+          const nextChoices = currentIdx >= 0 ? choices.slice(currentIdx + 1) : choices;
+          for (const choice of nextChoices) {
+            const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
+            if (!el) continue;
+            if (el.gradeRestriction && parseInt(el.gradeRestriction) !== parseInt(a.student.grade)) continue;
+            const avail = electivePMap[el.id] || pids;
+            const openP = avail.find(p => p !== assignedPid && !Object.keys(a.schedule).includes(p) && getE(el.id, p) < cap(el));
+            if (openP) {
+              // Remove from old class
+              delete a.schedule[assignedPid];
+              // Add to new class
+              a.schedule[openP] = "[E] " + el.name;
+              // Update electives list
+              a.electives = (a.electives || []).map(e => e === item.name ? el.name : e);
+              if (a.elective === item.name) a.elective = el.name;
+              addE(el.id, openP);
+              break;
+            }
+          }
+        });
+      }
+    }
+  });
+
+  return { assignments, conflicts, underMin };
 }
 
 
@@ -495,6 +545,7 @@ function ClassesPage({ state, setState }) {
               React.createElement("th", null, "Name"),
               tab === "standard" ? React.createElement("th", null, "Grade") : React.createElement("th", null, "Type"),
               tab === "standard" ? React.createElement("th", null, "Category") : React.createElement("th", null, "Cap"),
+              tab === "standard" ? React.createElement("th", null, "Max Size") : React.createElement("th", null, ""),
               tab === "standard" ? React.createElement("th", null, "Flags") : React.createElement("th", null, ""),
               React.createElement("th", null, "Period Hints"),
               React.createElement("th", null)
@@ -508,6 +559,9 @@ function ClassesPage({ state, setState }) {
                     : React.createElement("td", null, item.isElaIntervention || item.isMathIntervention ? React.createElement("span", { className: "tag tag-red" }, "Intervention") : item.isYearLong ? React.createElement("span", { className: "tag tag-green" }, "Year-Long") : React.createElement("span", { className: "tag tag-blue" }, "Semester")),
                   tab === "standard"
                     ? React.createElement("td", null, item.category ? React.createElement("span", { className: "tag tag-blue" }, item.category) : React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "-"))
+                    : React.createElement("td", null, item.maxSize || "25"),
+                  tab === "standard"
+                    ? React.createElement("td", null, React.createElement("span", { style: { fontSize: 11, color: "var(--text2)" } }, item.maxSize || "25"))
                     : React.createElement("td", null),
                   tab === "standard"
                     ? React.createElement("td", null,
@@ -538,7 +592,7 @@ function ClassesPage({ state, setState }) {
           React.createElement("div", { className: "modal-title" }, (editing ? "Edit " : "Add ") + (tab === "standard" ? "Standard Class" : "Elective")),
           React.createElement("div", { className: "flex-col" },
             React.createElement("div", null, React.createElement("label", null, "Name"), React.createElement("input", { value: form.name || "", onChange: e => setForm(f => ({ ...f, name: e.target.value })), placeholder: tab === "standard" ? "e.g. 6th Grade Math" : "e.g. Photography" })),
-            tab === "standard" && React.createElement("div", { className: "grid2" },
+            tab === "standard" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 120px", gap: 12 } },
               React.createElement("div", null,
                 React.createElement("label", null, "Grade Level"),
                 React.createElement("select", { value: form.gradeLevel || "all", onChange: e => setForm(f => ({ ...f, gradeLevel: e.target.value })) },
@@ -549,12 +603,30 @@ function ClassesPage({ state, setState }) {
                 )
               ),
               React.createElement("div", null,
-                React.createElement("label", null, "Category ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(e.g. Math, ELA, Science)")),
+                React.createElement("label", null, "Category ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(e.g. Math, ELA)")),
                 React.createElement("input", { value: form.category || "", onChange: e => setForm(f => ({ ...f, category: e.target.value })), placeholder: "e.g. Math" })
+              ),
+              React.createElement("div", null,
+                React.createElement("label", null, "Max Size"),
+                React.createElement("input", { type: "number", min: "1", value: form.maxSize || "25", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })) })
               )
             ),
-            tab === "elective" && React.createElement("div", { className: "grid2" },
+            tab === "standard" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+              React.createElement("div", null,
+                React.createElement("label", null, "Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
+                React.createElement("input", { type: "number", min: "0", value: form.minSize || "", onChange: e => setForm(f => ({ ...f, minSize: e.target.value })), placeholder: "No minimum" })
+              ),
+              React.createElement("div", null,
+                React.createElement("label", null, "If min not met"),
+                React.createElement("select", { value: form.minAction || "flag", onChange: e => setForm(f => ({ ...f, minAction: e.target.value })) },
+                  React.createElement("option", { value: "flag" }, "Flag for review"),
+                  React.createElement("option", { value: "reassign" }, "Reassign students to other choices")
+                )
+              )
+            ),
+            tab === "elective" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } },
               React.createElement("div", null, React.createElement("label", null, "Max Class Size"), React.createElement("input", { type: "number", value: form.maxSize || "25", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })) })),
+              React.createElement("div", null, React.createElement("label", null, "Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")), React.createElement("input", { type: "number", min: "0", value: form.minSize || "", onChange: e => setForm(f => ({ ...f, minSize: e.target.value })), placeholder: "No minimum" })),
               React.createElement("div", null,
                 React.createElement("label", null, "Grade Restriction"),
                 React.createElement("select", { value: form.gradeRestriction || "", onChange: e => setForm(f => ({ ...f, gradeRestriction: e.target.value })) },
@@ -681,7 +753,7 @@ function SchedulePage({ state, setState }) {
     setRunning(true);
     setTimeout(() => {
       const result = runScheduler(state);
-      const r = { id: "run_" + Date.now(), name: runName, date: new Date().toLocaleString(), totalStudents: students.length, conflicts: result.conflicts.length, assigned: students.length - result.conflicts.length, result };
+      const r = { id: "run_" + Date.now(), name: runName, date: new Date().toLocaleString(), totalStudents: students.length, conflicts: result.conflicts.length, assigned: students.length - result.conflicts.length, underMin: (result.underMin || []).length, result };
       setState(s => ({ ...s, runs: [r, ...s.runs] }));
       setLastRun(r);
       setRunning(false);
@@ -877,6 +949,37 @@ function ConflictsPage({ state, setState }) {
       conflicts.length > 0 && React.createElement("div", { className: "alert alert-info", style: { marginBottom: 16 } }, "Auto-Assign will bump caps by 1 for each student's top choice and re-run. You can also resolve manually below."),
       !activeRun && React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "No runs yet"), React.createElement("div", { className: "empty-sub" }, "Run the scheduler first")),
       activeRun && conflicts.length === 0 && React.createElement("div", { className: "alert alert-success" }, "No conflicts - all students assigned successfully."),
+
+      activeRun && (activeRun.result.underMin || []).length > 0 && React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 500, color: "var(--accent3)", marginBottom: 10, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.08em" } }, "Classes Below Minimum Enrollment"),
+        React.createElement("div", { className: "alert alert-warn", style: { marginBottom: 12 } },
+          "The following classes did not reach their minimum enrollment. You can add students manually or re-run the scheduler."
+        ),
+        (activeRun.result.underMin || []).map((u, i) =>
+          React.createElement("div", { key: i, style: { background: "var(--surface)", border: "1px solid rgba(255,181,71,0.3)", borderRadius: 8, padding: 16, marginBottom: 10 } },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
+              React.createElement("div", null,
+                React.createElement("div", { style: { color: "var(--text)", fontWeight: 500 } }, u.item.name),
+                React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 2 } },
+                  u.totalEnrolled + " enrolled / " + u.minSize + " minimum required"
+                )
+              ),
+              React.createElement("div", { className: "flex" },
+                React.createElement("span", { className: "tag tag-yellow" }, (u.minSize - u.totalEnrolled) + " short"),
+                u.item.minAction === "reassign"
+                  ? React.createElement("span", { className: "tag tag-blue" }, "Auto-reassign on re-run")
+                  : React.createElement("span", { className: "tag tag-gray" }, "Manual review")
+              )
+            ),
+            React.createElement("div", { className: "progress-bar", style: { height: 6, background: "var(--surface3)", borderRadius: 3, overflow: "hidden" } },
+              React.createElement("div", { style: { height: "100%", width: Math.round((u.totalEnrolled / u.minSize) * 100) + "%", background: "var(--accent3)", borderRadius: 3, transition: "width 0.3s" } })
+            ),
+            React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", marginTop: 4 } },
+              Math.round((u.totalEnrolled / u.minSize) * 100) + "% of minimum met"
+            )
+          )
+        )
+      ),
       conflicts.map((c, i) => {
         const sel = overrides[c.student.student_id];
         const info = sel ? getInfo(sel) : null;
@@ -978,7 +1081,7 @@ function App() {
     React.createElement("div", null,
       updateAvail && React.createElement("div", { className: "update-bar" },
         React.createElement("span", null, "A new version is available"),
-        React.createElement("button", { onClick: () => { window.location.href = APP_URL + "?v=" + Date.now(); } }, "Update Now"),
+        React.createElement("button", { onClick: () => { window.location.reload(true); setUpdateAvail(false); } }, "Update Now"),
         React.createElement("button", { onClick: () => setUpdateAvail(false), style: { background: "transparent", color: "#1a1a00", border: "none", cursor: "pointer", fontSize: 14 } }, "x")
       ),
       React.createElement("div", { className: "shell" },
