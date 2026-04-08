@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.2.2";
+const APP_VERSION = "1.2.3";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -176,7 +176,8 @@ function runScheduler(state) {
   };
 
   // Can this class accept another student in this period?
-  const canAssign = (item, pid) => {
+  // studentUsed: Set of period IDs already taken by this student (optional)
+  const canAssign = (item, pid, studentUsed) => {
     const ms = maxSize(item);
     const slots = getSlots(item.id);
     // ALWAYS enforce per-period cap first
@@ -185,15 +186,24 @@ function runScheduler(state) {
     if (slots.has(pid)) return true;
     // This is a NEW slot - check maxPeriods limit
     if (slots.size >= maxPeriods(item)) return false;
-    // For ELECTIVES only: don't open a new slot while existing slots still have room
-    // This concentrates students into fewer, fuller sections
-    if (isElective(item.id)) {
-      const existingSlotsFull = slots.size === 0 || [...slots].every(p => getE(item.id, p) >= ms);
-      return existingSlotsFull;
+    // For ELECTIVES only: only open a new slot if the student cannot
+    // access any existing slot that still has room
+    if (isElective(item.id) && studentUsed) {
+      const accessibleWithRoom = [...slots].some(p =>
+        !studentUsed.has(p) && getE(item.id, p) < ms
+      );
+      // If any existing slot is accessible and has room, don't open new slot
+      if (accessibleWithRoom) return false;
+    } else if (isElective(item.id) && !studentUsed) {
+      // Without student context, fall back to: block if any slot has room
+      const existingHasRoom = slots.size > 0 && [...slots].some(p => getE(item.id, p) < ms);
+      if (existingHasRoom) return false;
     }
-    // Standard classes: open new slots freely (each section is a separate class)
+    // Standard classes: open new slots freely
     return true;
   };
+  // Wrapper that always passes student context
+  const canAssignFor = (item, pid, usedSet) => canAssign(item, pid, usedSet);
 
   // ── Student constraint scoring ─────────────────────────────────────────────
   const getChoices = s => {
@@ -286,7 +296,7 @@ function runScheduler(state) {
       if (!intC) return;
       // Prefer 1st period per school rule
       const candidates = [pids[0], ...pids.slice(1)];
-      const open = candidates.find(p => !used.has(p) && canAssign(intC, p));
+      const open = candidates.find(p => !used.has(p) && canAssignFor(intC, p, used));
       if (open) { schedule[open] = intC.name; used.add(open); addE(intC.id, open); markSlot(intC.id, open); stdCount++; }
     };
     if (desigs.includes("ELA Intervention")) assignIntervention(true);
@@ -323,7 +333,7 @@ function runScheduler(state) {
       if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return false;
       if (assigned.includes(el.name)) return false;
       const avail = electivePMap[el.id] || pids;
-      const openSlots = avail.filter(p => !used.has(p) && canAssign(el, p));
+      const openSlots = avail.filter(p => !used.has(p) && canAssignFor(el, p, used));
       if (!openSlots.length) return false;
       // preferBusy: use getBestSlot to concentrate into existing sections
       const open = preferBusy
