@@ -263,19 +263,53 @@ function runScheduler(state) {
         if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); standardCount++; if (cls.category) usedCategories.add(cls.category.toLowerCase()); }
       });
 
-    // Step 5: Assign 2 electives by ranked preference
+    // Step 5: Assign 2 electives using minimum-aware two-pass approach
     const choices = getChoices(student);
     const assignedElectives = [];
+
+    // Helper: try to assign a specific elective to this student
+    const tryAssign = (el) => {
+      if (assignedElectives.length >= NUM_ELECTIVES) return false;
+      if (!el || el.isElaIntervention || el.isMathIntervention) return false;
+      if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return false;
+      if (assignedElectives.includes(el.name)) return false;
+      const avail = electivePMap[el.id] || pids;
+      const open = avail.find(p => !used.has(p) && getE(el.id, p) < cap(el));
+      if (!open) return false;
+      schedule[open] = "[E] " + el.name;
+      assignedElectives.push(el.name);
+      used.add(open);
+      addE(el.id, open);
+      return true;
+    };
+
+    // Get effective min for an elective
+    const getMin = (el) => {
+      if (el.minSize && parseInt(el.minSize) > 0) return parseInt(el.minSize);
+      return globalMin || 0;
+    };
+
+    // Get current total enrollment for an elective across all periods
+    const getTotalEnroll = (el) => pids.reduce((sum, p) => sum + getE(el.id, p), 0);
+
+    // Pass 1: from the student's ranked choices, find any that are BELOW minimum
+    // and assign those first to help them reach their minimum
     for (const choice of choices) {
       if (assignedElectives.length >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
       if (!el) continue;
-      if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) continue;
-      // Don't assign the same elective twice
-      if (assignedElectives.includes(el.name)) continue;
-      const avail = electivePMap[el.id] || pids;
-      const open = avail.find(p => !used.has(p) && getE(el.id, p) < cap(el));
-      if (open) { schedule[open] = "[E] " + el.name; assignedElectives.push(el.name); used.add(open); addE(el.id, open); }
+      const elMin = getMin(el);
+      if (elMin > 0 && getTotalEnroll(el) < elMin) {
+        tryAssign(el);
+      }
+    }
+
+    // Pass 2: fill remaining elective slots by normal ranked preference
+    for (const choice of choices) {
+      if (assignedElectives.length >= NUM_ELECTIVES) break;
+      const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
+      if (!el) continue;
+      tryAssign(el);
     }
 
     if (assignedElectives.length === 0 && choices.length > 0) {
