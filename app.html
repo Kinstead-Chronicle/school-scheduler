@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.1.7";
+const APP_VERSION = "1.1.9";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -120,297 +120,274 @@ function save(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
 function runScheduler(state) {
   const { periods, classes, electives, students, peaksPairs = [] } = state;
   if (!students.length || !periods.length) return { assignments: [], conflicts: [] };
+
   const pids = periods.map(p => p.id);
-  const MAX_STANDARD = 4;  // 4 standard class periods, 2 elective periods
+  const MAX_STANDARD = 4;
   const NUM_ELECTIVES = 2;
 
+  // ── Period availability maps ───────────────────────────────────────────────
   const classPMap = {};
   const singlePeriod = new Set();
   classes.forEach(c => {
     const ps = (c.periods || "").split(",").map(x => x.trim()).filter(Boolean);
-    classPMap[c.id] = ps.length ? ps : [...pids];
-    if (ps.length === 1) singlePeriod.add(c.id);
+    const valid = ps.filter(p => pids.includes(p));
+    classPMap[c.id] = valid.length ? valid : [...pids];
+    if (valid.length === 1) singlePeriod.add(c.id);
   });
+
   const electivePMap = {};
   electives.forEach(e => {
     const ps = (e.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
-    // Only use periods that actually exist in the school's period list
-    const validPs = ps.filter(pid => pids.includes(pid));
-    electivePMap[e.id] = validPs.length ? validPs : ps.length ? ps : [...pids];
-    if (ps.length && !validPs.length) {
-      console.warn("Elective '" + e.name + "' has period hints [" + ps.join(",") + "] but none match school periods [" + pids.join(",") + "]. Ignoring hints.");
-    }
+    const valid = ps.filter(p => pids.includes(p));
+    electivePMap[e.id] = valid.length ? valid : [...pids];
   });
+
+  // ── Enrollment tracking ────────────────────────────────────────────────────
   const enroll = {};
-  const ekey = (c, p) => c + "__" + p;
-  const getE = (c, p) => enroll[ekey(c, p)] || 0;
-  const addE = (c, p) => { enroll[ekey(c, p)] = getE(c, p) + 1; };
+  const ekey = (id, pid) => id + "__" + pid;
+  const getE = (id, pid) => enroll[ekey(id, pid)] || 0;
+  const addE = (id, pid) => { enroll[ekey(id, pid)] = (enroll[ekey(id, pid)] || 0) + 1; };
 
-  // Track which periods each class is actively used in (for maxPeriods enforcement)
-  const activePeriodsPerClass = {}; // classId -> Set of periodIds
-  const getActivePeriods = (classId) => activePeriodsPerClass[classId] || new Set();
-  const markActivePeriod = (classId, pid) => {
-    if (!activePeriodsPerClass[classId]) activePeriodsPerClass[classId] = new Set();
-    activePeriodsPerClass[classId].add(pid);
-  };
+  // Track active period slots per class (for max periods enforcement)
+  const activeSlots = {}; // id -> Set of pids
+  const getSlots = id => activeSlots[id] || (activeSlots[id] = new Set());
+  const markSlot = (id, pid) => getSlots(id).add(pid);
 
-  // Get maxPeriods for a class/elective (per-item override, then global default for electives, then no limit)
-  const getMaxPeriods = (item) => {
-    if (item.maxPeriods && parseInt(item.maxPeriods) > 0) return parseInt(item.maxPeriods);
-    if (electives.some(e => e.id === item.id)) {
-      const gmp = parseInt((state.electiveDefaults || {}).maxPeriods);
-      if (gmp > 0) return gmp;
-    }
-    return Infinity;
-  };
+  // ── Caps ───────────────────────────────────────────────────────────────────
+  const globalElecMax = parseInt((state.electiveDefaults || {}).maxSize) || 25;
+  const globalElecMin = parseInt((state.electiveDefaults || {}).minSize) || 0;
+  const globalElecMaxPeriods = parseInt((state.electiveDefaults || {}).maxPeriods) || Infinity;
 
-  // Check if a class can still be offered in this period slot
-  const canUseperiod = (item, pid) => {
-    const existing = getActivePeriods(item.id);
-    if (existing.has(pid)) return true; // already active in this period, fine
-    return existing.size < getMaxPeriods(item);
-  };
-  const globalMax = parseInt((state.electiveDefaults || {}).maxSize) || 25;
-  const globalMin = parseInt((state.electiveDefaults || {}).minSize) || 0;
-  // For electives, fall back to global defaults if no per-item value set
-  const isElective = item => electives.some(e => e.id === item.id);
-  const cap = item => {
+  const isElective = id => electives.some(e => e.id === id);
+
+  const maxSize = item => {
     if (item.maxSize && parseInt(item.maxSize) > 0) return parseInt(item.maxSize);
-    return isElective(item) ? globalMax : 25;
+    return isElective(item.id) ? globalElecMax : 25;
   };
-  const minCap = item => {
-    if (item.minSize && parseInt(item.minSize) > 0) return parseInt(item.minSize);
-    return isElective(item) ? globalMin : 0;
-  };
-  const getChoices = s => { const ch = []; for (let i = 1; i <= 12; i++) { const v = s["choice_" + i]; if (v && v.trim()) ch.push(v.trim()); } return ch; };
 
-  const score = student => {
+  const minSize = item => {
+    if (item.minSize && parseInt(item.minSize) > 0) return parseInt(item.minSize);
+    return isElective(item.id) ? globalElecMin : 0;
+  };
+
+  const maxPeriods = item => {
+    if (item.maxPeriods && parseInt(item.maxPeriods) > 0) return parseInt(item.maxPeriods);
+    return isElective(item.id) ? globalElecMaxPeriods : Infinity;
+  };
+
+  // Can this class accept another student in this period?
+  const canAssign = (item, pid) => {
+    // Must be under per-period cap
+    if (getE(item.id, pid) >= maxSize(item)) return false;
+    // If this is a new period slot, must be under maxPeriods
+    if (!getSlots(item.id).has(pid) && getSlots(item.id).size >= maxPeriods(item)) return false;
+    return true;
+  };
+
+  // ── Student constraint scoring ─────────────────────────────────────────────
+  const getChoices = s => {
+    const ch = [];
+    for (let i = 1; i <= 12; i++) { const v = s["choice_" + i]; if (v && v.trim()) ch.push(v.trim()); }
+    return ch;
+  };
+
+  const scoreStudent = student => {
     let sc = 0;
     const grade = parseInt(student.grade);
     const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
     if (desigs.includes("ELA Intervention") || desigs.includes("Math Intervention")) sc += 1000;
     if (desigs.includes("ESE")) sc += 300;
     if (desigs.includes("Accelerated")) sc += 200;
-    const gradePair = peaksPairs.find(pair => pair.gradeLevel === String(grade));
-    if (gradePair) sc += 600;
-    classes.filter(c => {
-      if (c.grades && c.grades.length > 0) return c.grades.includes(String(grade));
-      if (c.gradeLevel && c.gradeLevel !== "all") return c.gradeLevel === String(grade);
-      return true;
-    }).forEach(c => {
+    if (peaksPairs.find(p => p.gradeLevel === String(grade))) sc += 600;
+    const matchGrade = c => c.grades && c.grades.length > 0 ? c.grades.includes(String(grade)) : (!c.gradeLevel || c.gradeLevel === "all" || c.gradeLevel === String(grade));
+    classes.filter(matchGrade).forEach(c => {
       const ps = classPMap[c.id] || [];
       if (ps.length === 1) sc += 500;
       else if (ps.length <= 2) sc += 100;
     });
     getChoices(student).forEach(name => {
       const e = electives.find(el => el.name.toLowerCase() === name.toLowerCase());
-      if (e) { const ps = electivePMap[e.id] || []; if (ps.length === 1) sc += 200; else if (ps.length <= 2) sc += 50; }
+      if (e) {
+        const ps = electivePMap[e.id] || [];
+        if (ps.length === 1) sc += 200;
+        else if (ps.length <= 2) sc += 50;
+      }
     });
     return sc;
   };
 
-  const sorted = [...students].sort((a, b) => score(b) - score(a));
+  // Sort most-constrained students first
+  const sorted = [...students].sort((a, b) => scoreStudent(b) - scoreStudent(a));
+
   const conflicts = [];
 
+  // ── Schedule each student ──────────────────────────────────────────────────
   const assignments = sorted.map(student => {
     const grade = parseInt(student.grade);
     const desigs = (student.designation || "").split("|").map(d => d.trim()).filter(Boolean);
     const schedule = {};
     const used = new Set();
-    let standardCount = 0;
-    // Support both legacy gradeLevel and new grades array
-    const matchesGrade = (c) => {
-      if (c.grades && c.grades.length > 0) return c.grades.includes(String(grade));
-      if (c.gradeLevel && c.gradeLevel !== "all") return c.gradeLevel === String(grade);
-      return true; // "all" or no grade set
-    };
-    const gradeClasses = classes.filter(matchesGrade);
-    const pairedClassIds = new Set(peaksPairs.flatMap(pair => [pair.classAId, pair.classBId]));
+    let stdCount = 0;
 
-    // Step 1: PEAKS pair (counts as 2 standard slots)
-    const gradePair = peaksPairs.find(pair => pair.gradeLevel === String(grade));
+    const matchGrade = c => c.grades && c.grades.length > 0 ? c.grades.includes(String(grade)) : (!c.gradeLevel || c.gradeLevel === "all" || c.gradeLevel === String(grade));
+    const gradeClasses = classes.filter(matchGrade);
+    const pairedIds = new Set(peaksPairs.flatMap(p => [p.classAId, p.classBId]));
+
+    // Step 1: PEAKS pair
+    const gradePair = peaksPairs.find(p => p.gradeLevel === String(grade));
     if (gradePair) {
-      const classA = classes.find(c => c.id === gradePair.classAId);
-      const classB = classes.find(c => c.id === gradePair.classBId);
-      if (classA && classB) {
-        const aPs = (classA.periods || "").split(",").map(x => x.trim()).filter(Boolean);
-        const bPs = (classB.periods || "").split(",").map(x => x.trim()).filter(Boolean);
+      const cA = classes.find(c => c.id === gradePair.classAId);
+      const cB = classes.find(c => c.id === gradePair.classBId);
+      if (cA && cB) {
         let placed = false;
-        for (let i = 0; i < pids.length - 1; i++) {
+        for (let i = 0; i < pids.length - 1 && !placed; i++) {
           const p1 = pids[i], p2 = pids[i + 1];
-          if (!used.has(p1) && !used.has(p2)) {
-            const fwdOk = (aPs.length === 0 || aPs.includes(p1)) && (bPs.length === 0 || bPs.includes(p2)) && getE(classA.id, p1) < cap(classA) && getE(classB.id, p2) < cap(classB);
-            const revOk = (bPs.length === 0 || bPs.includes(p1)) && (aPs.length === 0 || aPs.includes(p2)) && getE(classB.id, p1) < cap(classB) && getE(classA.id, p2) < cap(classA);
-            if (fwdOk) { schedule[p1] = classA.name; schedule[p2] = classB.name; used.add(p1); used.add(p2); addE(classA.id, p1); addE(classB.id, p2); standardCount += 2; placed = true; break; }
-            else if (revOk) { schedule[p1] = classB.name; schedule[p2] = classA.name; used.add(p1); used.add(p2); addE(classB.id, p1); addE(classA.id, p2); standardCount += 2; placed = true; break; }
+          if (used.has(p1) || used.has(p2)) continue;
+          const fwd = canAssign(cA, p1) && canAssign(cB, p2);
+          const rev = canAssign(cB, p1) && canAssign(cA, p2);
+          if (fwd || rev) {
+            const [c1, c2] = fwd ? [cA, cB] : [cB, cA];
+            schedule[p1] = c1.name; schedule[p2] = c2.name;
+            used.add(p1); used.add(p2);
+            addE(c1.id, p1); addE(c2.id, p2);
+            markSlot(c1.id, p1); markSlot(c2.id, p2);
+            stdCount += 2; placed = true;
           }
         }
         if (!placed) {
           for (let i = 0; i < pids.length - 1; i++) {
-            if (!used.has(pids[i]) && !used.has(pids[i + 1])) {
-              schedule[pids[i]] = classA.name; schedule[pids[i + 1]] = classB.name;
-              used.add(pids[i]); used.add(pids[i + 1]); addE(classA.id, pids[i]); addE(classB.id, pids[i + 1]); markActivePeriod(classA.id, pids[i]); markActivePeriod(classB.id, pids[i + 1]); standardCount += 2; break;
+            if (!used.has(pids[i]) && !used.has(pids[i+1])) {
+              schedule[pids[i]] = cA.name; schedule[pids[i+1]] = cB.name;
+              used.add(pids[i]); used.add(pids[i+1]);
+              addE(cA.id, pids[i]); addE(cB.id, pids[i+1]);
+              markSlot(cA.id, pids[i]); markSlot(cB.id, pids[i+1]);
+              stdCount += 2; break;
             }
           }
         }
       }
     }
 
-    // Step 2: Intervention classes (count as standard slots)
-    const assignIntervention = (isEla) => {
-      if (standardCount >= MAX_STANDARD) return;
+    // Step 2: Intervention
+    const assignIntervention = isEla => {
+      if (stdCount >= MAX_STANDARD) return;
       const intC = electives.find(e => isEla ? e.isElaIntervention : e.isMathIntervention);
       if (!intC) return;
-      const intCap = parseInt(intC.maxSize) || 15;
-      const pref = pids[0];
-      if (!used.has(pref) && getE(intC.id, pref) < intCap) { schedule[pref] = intC.name; used.add(pref); addE(intC.id, pref); standardCount++; return; }
-      const avail = electivePMap[intC.id] || pids;
-      const open = avail.find(p => !used.has(p) && getE(intC.id, p) < intCap);
-      if (open) { schedule[open] = intC.name; used.add(open); addE(intC.id, open); standardCount++; }
+      // Prefer 1st period per school rule
+      const candidates = [pids[0], ...pids.slice(1)];
+      const open = candidates.find(p => !used.has(p) && canAssign(intC, p));
+      if (open) { schedule[open] = intC.name; used.add(open); addE(intC.id, open); markSlot(intC.id, open); stdCount++; }
     };
     if (desigs.includes("ELA Intervention")) assignIntervention(true);
     if (desigs.includes("Math Intervention")) assignIntervention(false);
 
-    // Step 3: Single-period-locked standard classes (most constrained first) — one per category
-    const usedCategoriesLocked = new Set();
-    gradeClasses.filter(c => !pairedClassIds.has(c.id) && singlePeriod.has(c.id))
-      .sort((a, b) => (classPMap[a.id] || []).length - (classPMap[b.id] || []).length)
+    // Step 3: Single-period-locked standard classes
+    const usedCats = new Set();
+    gradeClasses.filter(c => !pairedIds.has(c.id) && singlePeriod.has(c.id))
+      .sort((a, b) => (classPMap[a.id]||[]).length - (classPMap[b.id]||[]).length)
       .forEach(cls => {
-        if (standardCount >= MAX_STANDARD) return;
-        if (cls.category && usedCategoriesLocked.has(cls.category.toLowerCase())) return;
-        const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
-        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); markActivePeriod(cls.id, open); standardCount++; if (cls.category) usedCategoriesLocked.add(cls.category.toLowerCase()); }
+        if (stdCount >= MAX_STANDARD) return;
+        if (cls.category && usedCats.has(cls.category.toLowerCase())) return;
+        const open = (classPMap[cls.id]||pids).find(p => !used.has(p) && canAssign(cls, p));
+        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); markSlot(cls.id, open); stdCount++; if (cls.category) usedCats.add(cls.category.toLowerCase()); }
       });
 
-    // Step 4: Remaining standard classes — one per category
-    const usedCategories = usedCategoriesLocked;
-    gradeClasses.filter(c => !pairedClassIds.has(c.id) && !singlePeriod.has(c.id))
-      .sort((a, b) => (classPMap[a.id] || pids).length - (classPMap[b.id] || pids).length)
+    // Step 4: Remaining standard classes
+    gradeClasses.filter(c => !pairedIds.has(c.id) && !singlePeriod.has(c.id))
+      .sort((a, b) => (classPMap[a.id]||pids).length - (classPMap[b.id]||pids).length)
       .forEach(cls => {
-        if (standardCount >= MAX_STANDARD) return;
-        if (cls.category && usedCategories.has(cls.category.toLowerCase())) return;
-        const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
-        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); markActivePeriod(cls.id, open); standardCount++; if (cls.category) usedCategories.add(cls.category.toLowerCase()); }
+        if (stdCount >= MAX_STANDARD) return;
+        if (cls.category && usedCats.has(cls.category.toLowerCase())) return;
+        const open = (classPMap[cls.id]||pids).find(p => !used.has(p) && canAssign(cls, p));
+        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); markSlot(cls.id, open); stdCount++; if (cls.category) usedCats.add(cls.category.toLowerCase()); }
       });
 
-    // Step 5: Assign 2 electives using minimum-aware two-pass approach
+    // Step 5: Assign 2 electives - minimum-aware two-pass
     const choices = getChoices(student);
-    const assignedElectives = [];
+    const assigned = [];
 
-    // Helper: try to assign a specific elective to this student
-    // preferBusy=true concentrates students into the most-enrolled period slot
-    // to avoid 1-2 student stragglers spread across many periods
-    const tryAssign = (el, preferBusy = false) => {
-      if (assignedElectives.length >= NUM_ELECTIVES) return false;
+    const tryElective = (el, preferBusy) => {
+      if (assigned.length >= NUM_ELECTIVES) return false;
       if (!el || el.isElaIntervention || el.isMathIntervention) return false;
       if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return false;
-      if (assignedElectives.includes(el.name)) return false;
+      if (assigned.includes(el.name)) return false;
       const avail = electivePMap[el.id] || pids;
-      const openSlots = avail.filter(p => !used.has(p) && getE(el.id, p) < cap(el) && canUseperiod(el, p));
+      const openSlots = avail.filter(p => !used.has(p) && canAssign(el, p));
       if (!openSlots.length) return false;
-      // When concentrating (under-minimum mode), pick the slot with most enrollment
-      // so we build up full sections rather than spreading thin across all periods
+      // preferBusy: pick slot with most enrollment to concentrate into fewer sections
       const open = preferBusy
         ? openSlots.sort((a, b) => getE(el.id, b) - getE(el.id, a))[0]
         : openSlots[0];
       schedule[open] = "[E] " + el.name;
-      assignedElectives.push(el.name);
+      assigned.push(el.name);
       used.add(open);
       addE(el.id, open);
-      markActivePeriod(el.id, open);
+      markSlot(el.id, open);
       return true;
     };
 
-    // Get effective min for an elective
-    const getMin = (el) => {
-      if (el.minSize && parseInt(el.minSize) > 0) return parseInt(el.minSize);
-      return globalMin || 0;
+    const getTotalEnroll = el => pids.reduce((s, p) => s + getE(el.id, p), 0);
+    const isUnderMin = el => {
+      const mn = minSize(el);
+      return mn > 0 && getTotalEnroll(el) < mn;
     };
 
-    // Get current total enrollment for an elective across all periods
-    const getTotalEnroll = (el) => pids.reduce((sum, p) => sum + getE(el.id, p), 0);
-
-    // Check if elective is under minimum (total enrollment vs total minimum)
-    // minSize represents desired total enrollment across all period slots
-    const isUnderMin = (el) => {
-      const elMin = getMin(el);
-      if (elMin <= 0) return false;
-      return getTotalEnroll(el) < elMin;
-    };
-
-    // Pass 1: from the student's ranked choices, find any that are BELOW minimum
-    // Use preferBusy=true to concentrate students into existing sections
+    // Pass 1: prioritize choices that are below minimum (concentrate students there)
     for (const choice of choices) {
-      if (assignedElectives.length >= NUM_ELECTIVES) break;
+      if (assigned.length >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
-      if (!el) continue;
-      if (isUnderMin(el)) {
-        tryAssign(el, true);
-      }
+      if (el && isUnderMin(el)) tryElective(el, true);
     }
 
-    // Pass 2: fill remaining elective slots by normal ranked preference
+    // Pass 2: fill remaining slots by ranked preference
     for (const choice of choices) {
-      if (assignedElectives.length >= NUM_ELECTIVES) break;
+      if (assigned.length >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
-      if (!el) continue;
-      tryAssign(el, false);
+      if (el) tryElective(el, false);
     }
 
-    if (assignedElectives.length === 0 && choices.length > 0) {
+    if (assigned.length === 0 && choices.length > 0) {
       conflicts.push({ student, reason: "No elective choices could be assigned", choices });
-    } else if (assignedElectives.length < NUM_ELECTIVES && choices.length > 0) {
-      conflicts.push({ student, reason: "Only " + assignedElectives.length + " of 2 electives assigned - remaining choices unavailable", choices, partial: true, assigned: assignedElectives });
+    } else if (assigned.length < NUM_ELECTIVES && choices.length > 0) {
+      conflicts.push({ student, reason: "Only " + assigned.length + " of 2 electives assigned", choices, partial: true, assigned });
     } else if (choices.length === 0) {
       conflicts.push({ student, reason: "No elective choices provided", choices: [] });
     }
 
-    return { student, schedule, elective: assignedElectives[0] || null, elective2: assignedElectives[1] || null, electives: assignedElectives, conflicts: assignedElectives.length < NUM_ELECTIVES ? ["partial"] : [] };
+    return { student, schedule, elective: assigned[0] || null, elective2: assigned[1] || null, electives: assigned, conflicts: assigned.length < NUM_ELECTIVES ? ["partial"] : [] };
   });
 
-  // Post-scheduling: check minimum class sizes
+  // ── Post-run: check minimums ───────────────────────────────────────────────
   const allItems = [...classes, ...electives];
   const underMin = [];
   allItems.forEach(item => {
-    const minSize = parseInt(item.minSize);
-    const effectiveMin = minSize > 0 ? minSize : (electives.some(e => e.id === item.id) ? globalMin : 0);
-    if (!effectiveMin || effectiveMin <= 0) return;
-    const minSize2 = effectiveMin;
-    // Count enrollment across all periods for this class
-    let totalEnrolled = 0;
+    const mn = minSize(item);
+    if (mn <= 0) return;
+    let total = 0;
     const periodEnrollments = {};
-    pids.forEach(pid => {
-      const e = getE(item.id, pid);
-      if (e > 0) { totalEnrolled += e; periodEnrollments[pid] = e; }
-    });
-    if (totalEnrolled > 0 && totalEnrolled < minSize2) {
-      underMin.push({ item, totalEnrolled, minSize: minSize2, periodEnrollments, shortage: minSize2 - totalEnrolled });
-      // If action is reassign: move students from this class to their next choice
+    pids.forEach(pid => { const e = getE(item.id, pid); if (e > 0) { total += e; periodEnrollments[pid] = e; } });
+    if (total > 0 && total < mn) {
+      underMin.push({ item, totalEnrolled: total, minSize: mn, shortage: mn - total, periodEnrollments });
       if (item.minAction === "reassign") {
-        // Find all students assigned to this class and try to reassign them
         assignments.forEach(a => {
-          const periodWithClass = Object.entries(a.schedule).find(([pid, cls]) => cls === item.name || cls === "[E] " + item.name);
-          if (!periodWithClass) return;
-          const [assignedPid] = periodWithClass;
-          // Try next choices
+          const entry = Object.entries(a.schedule).find(([, cls]) => cls === item.name || cls === "[E] " + item.name);
+          if (!entry) return;
+          const [assignedPid] = entry;
           const choices = getChoices(a.student);
-          const currentIdx = choices.findIndex(c => c.toLowerCase() === item.name.toLowerCase());
-          const nextChoices = currentIdx >= 0 ? choices.slice(currentIdx + 1) : choices;
-          for (const choice of nextChoices) {
+          const idx = choices.findIndex(c => c.toLowerCase() === item.name.toLowerCase());
+          const next = idx >= 0 ? choices.slice(idx + 1) : choices;
+          for (const choice of next) {
             const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
             if (!el) continue;
             if (el.gradeRestriction && parseInt(el.gradeRestriction) !== parseInt(a.student.grade)) continue;
             const avail = electivePMap[el.id] || pids;
-            const openP = avail.find(p => p !== assignedPid && !Object.keys(a.schedule).includes(p) && getE(el.id, p) < cap(el));
+            const openP = avail.find(p => p !== assignedPid && !Object.keys(a.schedule).includes(p) && canAssign(el, p));
             if (openP) {
-              // Remove from old class
               delete a.schedule[assignedPid];
-              // Add to new class
               a.schedule[openP] = "[E] " + el.name;
-              // Update electives list
               a.electives = (a.electives || []).map(e => e === item.name ? el.name : e);
               if (a.elective === item.name) a.elective = el.name;
-              addE(el.id, openP);
+              addE(el.id, openP); markSlot(el.id, openP);
               break;
             }
           }
@@ -569,10 +546,16 @@ function ClassesPage({ state, setState }) {
   };
   const toggleP = pid => {
     const key = tab === "standard" ? "periods" : "availablePeriods";
-    const cur = form[key] || [];
-    setForm(f => ({ ...f, [key]: cur.includes(pid) ? cur.filter(p => p !== pid) : [...cur, pid] }));
+    // Use functional update to avoid stale closure - always read latest form state
+    setForm(f => {
+      const cur = f[key] || [];
+      return { ...f, [key]: cur.includes(pid) ? cur.filter(p => p !== pid) : [...cur, pid] };
+    });
   };
-  const clearPeriods = () => { const key = tab === "standard" ? "periods" : "availablePeriods"; setForm(f => ({ ...f, [key]: [] })); };
+  const clearPeriods = () => {
+    const key = tab === "standard" ? "periods" : "availablePeriods";
+    setForm(f => ({ ...f, [key]: [] }));
+  };
   const curPeriods = (tab === "standard" ? form.periods : form.availablePeriods) || [];
   const list = tab === "standard" ? classes : electives;
   const getName = id => { const c = classes.find(x => x.id === id); return c ? c.name : id; };
