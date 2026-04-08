@@ -219,22 +219,26 @@ function runScheduler(state) {
     if (desigs.includes("ELA Intervention")) assignIntervention(true);
     if (desigs.includes("Math Intervention")) assignIntervention(false);
 
-    // Step 3: Single-period-locked standard classes (most constrained first)
+    // Step 3: Single-period-locked standard classes (most constrained first) — one per category
+    const usedCategoriesLocked = new Set();
     gradeClasses.filter(c => !pairedClassIds.has(c.id) && singlePeriod.has(c.id))
       .sort((a, b) => (classPMap[a.id] || []).length - (classPMap[b.id] || []).length)
       .forEach(cls => {
         if (standardCount >= MAX_STANDARD) return;
+        if (cls.category && usedCategoriesLocked.has(cls.category.toLowerCase())) return;
         const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
-        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); standardCount++; }
+        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); standardCount++; if (cls.category) usedCategoriesLocked.add(cls.category.toLowerCase()); }
       });
 
-    // Step 4: Remaining standard classes
+    // Step 4: Remaining standard classes — one per category
+    const usedCategories = usedCategoriesLocked;
     gradeClasses.filter(c => !pairedClassIds.has(c.id) && !singlePeriod.has(c.id))
       .sort((a, b) => (classPMap[a.id] || pids).length - (classPMap[b.id] || pids).length)
       .forEach(cls => {
         if (standardCount >= MAX_STANDARD) return;
+        if (cls.category && usedCategories.has(cls.category.toLowerCase())) return;
         const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
-        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); standardCount++; }
+        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); standardCount++; if (cls.category) usedCategories.add(cls.category.toLowerCase()); }
       });
 
     // Step 5: Assign 2 electives by ranked preference
@@ -490,7 +494,8 @@ function ClassesPage({ state, setState }) {
             React.createElement("thead", null, React.createElement("tr", null,
               React.createElement("th", null, "Name"),
               tab === "standard" ? React.createElement("th", null, "Grade") : React.createElement("th", null, "Type"),
-              tab === "standard" ? React.createElement("th", null, "Flags") : React.createElement("th", null, "Cap"),
+              tab === "standard" ? React.createElement("th", null, "Category") : React.createElement("th", null, "Cap"),
+              tab === "standard" ? React.createElement("th", null, "Flags") : React.createElement("th", null, ""),
               React.createElement("th", null, "Period Hints"),
               React.createElement("th", null)
             )),
@@ -501,6 +506,9 @@ function ClassesPage({ state, setState }) {
                   tab === "standard"
                     ? React.createElement("td", null, item.gradeLevel === "all" ? React.createElement("span", { className: "tag tag-gray" }, "All") : React.createElement("span", { className: "tag tag-blue" }, item.gradeLevel + "th"))
                     : React.createElement("td", null, item.isElaIntervention || item.isMathIntervention ? React.createElement("span", { className: "tag tag-red" }, "Intervention") : item.isYearLong ? React.createElement("span", { className: "tag tag-green" }, "Year-Long") : React.createElement("span", { className: "tag tag-blue" }, "Semester")),
+                  tab === "standard"
+                    ? React.createElement("td", null, item.category ? React.createElement("span", { className: "tag tag-blue" }, item.category) : React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "-"))
+                    : React.createElement("td", null),
                   tab === "standard"
                     ? React.createElement("td", null,
                         peaksPairs.some(p => p.classAId === item.id || p.classBId === item.id) && React.createElement("span", { className: "tag tag-yellow" }, "PEAKS")
@@ -530,13 +538,19 @@ function ClassesPage({ state, setState }) {
           React.createElement("div", { className: "modal-title" }, (editing ? "Edit " : "Add ") + (tab === "standard" ? "Standard Class" : "Elective")),
           React.createElement("div", { className: "flex-col" },
             React.createElement("div", null, React.createElement("label", null, "Name"), React.createElement("input", { value: form.name || "", onChange: e => setForm(f => ({ ...f, name: e.target.value })), placeholder: tab === "standard" ? "e.g. 6th Grade Math" : "e.g. Photography" })),
-            tab === "standard" && React.createElement("div", null,
-              React.createElement("label", null, "Grade Level"),
-              React.createElement("select", { value: form.gradeLevel || "all", onChange: e => setForm(f => ({ ...f, gradeLevel: e.target.value })) },
-                React.createElement("option", { value: "all" }, "All Grades"),
-                React.createElement("option", { value: "6" }, "6th Grade"),
-                React.createElement("option", { value: "7" }, "7th Grade"),
-                React.createElement("option", { value: "8" }, "8th Grade")
+            tab === "standard" && React.createElement("div", { className: "grid2" },
+              React.createElement("div", null,
+                React.createElement("label", null, "Grade Level"),
+                React.createElement("select", { value: form.gradeLevel || "all", onChange: e => setForm(f => ({ ...f, gradeLevel: e.target.value })) },
+                  React.createElement("option", { value: "all" }, "All Grades"),
+                  React.createElement("option", { value: "6" }, "6th Grade"),
+                  React.createElement("option", { value: "7" }, "7th Grade"),
+                  React.createElement("option", { value: "8" }, "8th Grade")
+                )
+              ),
+              React.createElement("div", null,
+                React.createElement("label", null, "Category ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(e.g. Math, ELA, Science)")),
+                React.createElement("input", { value: form.category || "", onChange: e => setForm(f => ({ ...f, category: e.target.value })), placeholder: "e.g. Math" })
               )
             ),
             tab === "elective" && React.createElement("div", { className: "grid2" },
