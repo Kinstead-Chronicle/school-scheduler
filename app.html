@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.1.6";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -140,6 +140,31 @@ function runScheduler(state) {
   const ekey = (c, p) => c + "__" + p;
   const getE = (c, p) => enroll[ekey(c, p)] || 0;
   const addE = (c, p) => { enroll[ekey(c, p)] = getE(c, p) + 1; };
+
+  // Track which periods each class is actively used in (for maxPeriods enforcement)
+  const activePeriodsPerClass = {}; // classId -> Set of periodIds
+  const getActivePeriods = (classId) => activePeriodsPerClass[classId] || new Set();
+  const markActivePeriod = (classId, pid) => {
+    if (!activePeriodsPerClass[classId]) activePeriodsPerClass[classId] = new Set();
+    activePeriodsPerClass[classId].add(pid);
+  };
+
+  // Get maxPeriods for a class/elective (per-item override, then global default for electives, then no limit)
+  const getMaxPeriods = (item) => {
+    if (item.maxPeriods && parseInt(item.maxPeriods) > 0) return parseInt(item.maxPeriods);
+    if (electives.some(e => e.id === item.id)) {
+      const gmp = parseInt((state.electiveDefaults || {}).maxPeriods);
+      if (gmp > 0) return gmp;
+    }
+    return Infinity;
+  };
+
+  // Check if a class can still be offered in this period slot
+  const canUseperiod = (item, pid) => {
+    const existing = getActivePeriods(item.id);
+    if (existing.has(pid)) return true; // already active in this period, fine
+    return existing.size < getMaxPeriods(item);
+  };
   const globalMax = parseInt((state.electiveDefaults || {}).maxSize) || 25;
   const globalMin = parseInt((state.electiveDefaults || {}).minSize) || 0;
   // For electives, fall back to global defaults if no per-item value set
@@ -219,7 +244,7 @@ function runScheduler(state) {
           for (let i = 0; i < pids.length - 1; i++) {
             if (!used.has(pids[i]) && !used.has(pids[i + 1])) {
               schedule[pids[i]] = classA.name; schedule[pids[i + 1]] = classB.name;
-              used.add(pids[i]); used.add(pids[i + 1]); addE(classA.id, pids[i]); addE(classB.id, pids[i + 1]); standardCount += 2; break;
+              used.add(pids[i]); used.add(pids[i + 1]); addE(classA.id, pids[i]); addE(classB.id, pids[i + 1]); markActivePeriod(classA.id, pids[i]); markActivePeriod(classB.id, pids[i + 1]); standardCount += 2; break;
             }
           }
         }
@@ -249,7 +274,7 @@ function runScheduler(state) {
         if (standardCount >= MAX_STANDARD) return;
         if (cls.category && usedCategoriesLocked.has(cls.category.toLowerCase())) return;
         const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
-        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); standardCount++; if (cls.category) usedCategoriesLocked.add(cls.category.toLowerCase()); }
+        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); markActivePeriod(cls.id, open); standardCount++; if (cls.category) usedCategoriesLocked.add(cls.category.toLowerCase()); }
       });
 
     // Step 4: Remaining standard classes — one per category
@@ -260,7 +285,7 @@ function runScheduler(state) {
         if (standardCount >= MAX_STANDARD) return;
         if (cls.category && usedCategories.has(cls.category.toLowerCase())) return;
         const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && getE(cls.id, p) < cap(cls));
-        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); standardCount++; if (cls.category) usedCategories.add(cls.category.toLowerCase()); }
+        if (open) { schedule[open] = cls.name; used.add(open); addE(cls.id, open); markActivePeriod(cls.id, open); standardCount++; if (cls.category) usedCategories.add(cls.category.toLowerCase()); }
       });
 
     // Step 5: Assign 2 electives using minimum-aware two-pass approach
@@ -268,18 +293,26 @@ function runScheduler(state) {
     const assignedElectives = [];
 
     // Helper: try to assign a specific elective to this student
-    const tryAssign = (el) => {
+    // preferBusy=true concentrates students into the most-enrolled period slot
+    // to avoid 1-2 student stragglers spread across many periods
+    const tryAssign = (el, preferBusy = false) => {
       if (assignedElectives.length >= NUM_ELECTIVES) return false;
       if (!el || el.isElaIntervention || el.isMathIntervention) return false;
       if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return false;
       if (assignedElectives.includes(el.name)) return false;
       const avail = electivePMap[el.id] || pids;
-      const open = avail.find(p => !used.has(p) && getE(el.id, p) < cap(el));
-      if (!open) return false;
+      const openSlots = avail.filter(p => !used.has(p) && getE(el.id, p) < cap(el) && canUseperiod(el, p));
+      if (!openSlots.length) return false;
+      // When concentrating (under-minimum mode), pick the slot with most enrollment
+      // so we build up full sections rather than spreading thin across all periods
+      const open = preferBusy
+        ? openSlots.sort((a, b) => getE(el.id, b) - getE(el.id, a))[0]
+        : openSlots[0];
       schedule[open] = "[E] " + el.name;
       assignedElectives.push(el.name);
       used.add(open);
       addE(el.id, open);
+      markActivePeriod(el.id, open);
       return true;
     };
 
@@ -301,13 +334,13 @@ function runScheduler(state) {
     };
 
     // Pass 1: from the student's ranked choices, find any that are BELOW minimum
-    // and assign those first to help them reach their minimum
+    // Use preferBusy=true to concentrate students into existing sections
     for (const choice of choices) {
       if (assignedElectives.length >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
       if (!el) continue;
       if (isUnderMin(el)) {
-        tryAssign(el);
+        tryAssign(el, true);
       }
     }
 
@@ -316,7 +349,7 @@ function runScheduler(state) {
       if (assignedElectives.length >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
       if (!el) continue;
-      tryAssign(el);
+      tryAssign(el, false);
     }
 
     if (assignedElectives.length === 0 && choices.length > 0) {
@@ -727,6 +760,10 @@ function ClassesPage({ state, setState }) {
               React.createElement("div", null,
                 React.createElement("label", null, "Max Size"),
                 React.createElement("input", { type: "number", min: "1", value: form.maxSize || "25", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })) })
+              ),
+              React.createElement("div", null,
+                React.createElement("label", null, "Max Periods ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
+                React.createElement("input", { type: "number", min: "1", value: form.maxPeriods || "", onChange: e => setForm(f => ({ ...f, maxPeriods: e.target.value })), placeholder: "No limit" })
               )
             ),
             tab === "standard" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
@@ -742,9 +779,10 @@ function ClassesPage({ state, setState }) {
                 )
               )
             ),
-            tab === "elective" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } },
+            tab === "elective" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 } },
               React.createElement("div", null, React.createElement("label", null, "Max Class Size"), React.createElement("input", { type: "number", value: form.maxSize || "25", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })) })),
               React.createElement("div", null, React.createElement("label", null, "Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")), React.createElement("input", { type: "number", min: "0", value: form.minSize || "", onChange: e => setForm(f => ({ ...f, minSize: e.target.value })), placeholder: "No minimum" })),
+              React.createElement("div", null, React.createElement("label", null, "Max Periods ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")), React.createElement("input", { type: "number", min: "1", value: form.maxPeriods || "", onChange: e => setForm(f => ({ ...f, maxPeriods: e.target.value })), placeholder: "No limit" })),
               React.createElement("div", null,
                 React.createElement("label", null, "Grade Restriction"),
                 React.createElement("select", { value: form.gradeRestriction || "", onChange: e => setForm(f => ({ ...f, gradeRestriction: e.target.value })) },
