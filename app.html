@@ -112,7 +112,7 @@ const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/versi
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
 
-const BLANK = { schoolName: "", lunchStart: "", lunchEnd: "", numPeriods: 6, periods: [], classes: [], electives: [], peaksPairs: [], students: [], runs: [] };
+const BLANK = { schoolName: "", lunchStart: "", lunchEnd: "", numPeriods: 6, periods: [], classes: [], electives: [], peaksPairs: [], electiveDefaults: { maxSize: "25", minSize: "" }, students: [], runs: [] };
 
 function load() { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
 function save(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {} }
@@ -140,7 +140,18 @@ function runScheduler(state) {
   const ekey = (c, p) => c + "__" + p;
   const getE = (c, p) => enroll[ekey(c, p)] || 0;
   const addE = (c, p) => { enroll[ekey(c, p)] = getE(c, p) + 1; };
-  const cap = item => parseInt(item.maxSize) || 25;
+  const globalMax = parseInt((state.electiveDefaults || {}).maxSize) || 25;
+  const globalMin = parseInt((state.electiveDefaults || {}).minSize) || 0;
+  // For electives, fall back to global defaults if no per-item value set
+  const isElective = item => electives.some(e => e.id === item.id);
+  const cap = item => {
+    if (item.maxSize && parseInt(item.maxSize) > 0) return parseInt(item.maxSize);
+    return isElective(item) ? globalMax : 25;
+  };
+  const minCap = item => {
+    if (item.minSize && parseInt(item.minSize) > 0) return parseInt(item.minSize);
+    return isElective(item) ? globalMin : 0;
+  };
   const getChoices = s => { const ch = []; for (let i = 1; i <= 12; i++) { const v = s["choice_" + i]; if (v && v.trim()) ch.push(v.trim()); } return ch; };
 
   const score = student => {
@@ -283,7 +294,9 @@ function runScheduler(state) {
   const underMin = [];
   allItems.forEach(item => {
     const minSize = parseInt(item.minSize);
-    if (!minSize || minSize <= 0) return;
+    const effectiveMin = minSize > 0 ? minSize : (electives.some(e => e.id === item.id) ? globalMin : 0);
+    if (!effectiveMin || effectiveMin <= 0) return;
+    const minSize2 = effectiveMin;
     // Count enrollment across all periods for this class
     let totalEnrolled = 0;
     const periodEnrollments = {};
@@ -291,8 +304,8 @@ function runScheduler(state) {
       const e = getE(item.id, pid);
       if (e > 0) { totalEnrolled += e; periodEnrollments[pid] = e; }
     });
-    if (totalEnrolled > 0 && totalEnrolled < minSize) {
-      underMin.push({ item, totalEnrolled, minSize, periodEnrollments });
+    if (totalEnrolled > 0 && totalEnrolled < minSize2) {
+      underMin.push({ item, totalEnrolled, minSize: minSize2, periodEnrollments });
       // If action is reassign: move students from this class to their next choice
       if (item.minAction === "reassign") {
         // Find all students assigned to this class and try to reassign them
@@ -441,7 +454,7 @@ function SetupPage({ state, setState }) {
 }
 
 function ClassesPage({ state, setState }) {
-  const { classes = [], electives = [], peaksPairs = [], periods = [] } = state;
+  const { classes = [], electives = [], peaksPairs = [], periods = [], electiveDefaults = { maxSize: "25", minSize: "" } } = state;
   const [tab, setTab] = useState("standard");
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -557,6 +570,32 @@ function ClassesPage({ state, setState }) {
         )
       ),
 
+      tab === "elective" && React.createElement("div", { className: "card", style: { borderColor: "rgba(79,200,255,0.3)" } },
+        React.createElement("div", { className: "card-title" }, "Global Elective Defaults"),
+        React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 12 } }, "Set the default min and max for all electives. Override individual electives below as needed."),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "160px 160px 1fr", gap: 12, alignItems: "flex-end" } },
+          React.createElement("div", null,
+            React.createElement("label", null, "Default Max Size"),
+            React.createElement("input", { type: "number", min: "1", value: electiveDefaults.maxSize || "25", onChange: e => setState(s => ({ ...s, electiveDefaults: { ...(s.electiveDefaults || {}), maxSize: e.target.value } })) })
+          ),
+          React.createElement("div", null,
+            React.createElement("label", null, "Default Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
+            React.createElement("input", { type: "number", min: "0", value: electiveDefaults.minSize || "", onChange: e => setState(s => ({ ...s, electiveDefaults: { ...(s.electiveDefaults || {}), minSize: e.target.value } })), placeholder: "No minimum" })
+          ),
+          React.createElement("div", null,
+            React.createElement("button", { className: "btn btn-secondary", onClick: () => {
+              setState(s => ({
+                ...s,
+                electives: s.electives.map(e => ({
+                  ...e,
+                  maxSize: (s.electiveDefaults || {}).maxSize || "25",
+                  minSize: (s.electiveDefaults || {}).minSize || ""
+                }))
+              }));
+            }}, "Apply to All Electives")
+          )
+        )
+      ),
       tab !== "peaks" && React.createElement("div", { className: "card" },
         list.length === 0 ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "Nothing yet"), React.createElement("div", { className: "empty-sub" }, "Click Add to get started")) :
         React.createElement("div", { style: { overflowX: "auto" } },
@@ -583,7 +622,7 @@ function ClassesPage({ state, setState }) {
                     : React.createElement("td", null, item.isElaIntervention || item.isMathIntervention ? React.createElement("span", { className: "tag tag-red" }, "Intervention") : item.isYearLong ? React.createElement("span", { className: "tag tag-green" }, "Year-Long") : React.createElement("span", { className: "tag tag-blue" }, "Semester")),
                   tab === "standard"
                     ? React.createElement("td", null, item.category ? React.createElement("span", { className: "tag tag-blue" }, item.category) : React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "-"))
-                    : React.createElement("td", null, item.maxSize || "25"),
+                    : React.createElement("td", null, item.maxSize ? item.maxSize : React.createElement("span", { style: { color: "var(--text3)" } }, electiveDefaults.maxSize || "25") + " (default)"),
                   tab === "standard"
                     ? React.createElement("td", null, React.createElement("span", { style: { fontSize: 11, color: "var(--text2)" } }, item.maxSize || "25"))
                     : React.createElement("td", null),
