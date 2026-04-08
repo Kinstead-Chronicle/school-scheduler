@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.1.6";
+const APP_VERSION = "1.1.7";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -134,7 +134,12 @@ function runScheduler(state) {
   const electivePMap = {};
   electives.forEach(e => {
     const ps = (e.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
-    electivePMap[e.id] = ps.length ? ps : [...pids];
+    // Only use periods that actually exist in the school's period list
+    const validPs = ps.filter(pid => pids.includes(pid));
+    electivePMap[e.id] = validPs.length ? validPs : ps.length ? ps : [...pids];
+    if (ps.length && !validPs.length) {
+      console.warn("Elective '" + e.name + "' has period hints [" + ps.join(",") + "] but none match school periods [" + pids.join(",") + "]. Ignoring hints.");
+    }
   });
   const enroll = {};
   const ekey = (c, p) => c + "__" + p;
@@ -718,7 +723,9 @@ function ClassesPage({ state, setState }) {
                   React.createElement("td", { style: { fontSize: 11 } },
                     (tab === "standard" ? (item.periods || "") : (item.availablePeriods || "")).split(",").filter(Boolean).map(pid => {
                       const p = periods.find(x => x.id === pid);
-                      return p ? React.createElement("span", { key: pid, className: "tag tag-gray" }, p.label) : null;
+                      return p
+                        ? React.createElement("span", { key: pid, className: "tag tag-gray" }, p.label)
+                        : React.createElement("span", { key: pid, className: "tag tag-red", title: "Period ID not found: " + pid }, "? " + pid);
                     })
                   ),
                   React.createElement("td", null,
