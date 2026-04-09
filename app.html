@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.2.5";
+const APP_VERSION = "1.2.6";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -161,17 +161,21 @@ function runScheduler(state) {
   const isElective = id => electives.some(e => e.id === id);
 
   const maxSize = item => {
-    if (item.maxSize && parseInt(item.maxSize) > 0) return parseInt(item.maxSize);
-    return isElective(item.id) ? globalElecMax : 25;
+    const explicit = parseInt(item.maxSize);
+    if (!isNaN(explicit) && explicit > 0) return explicit;
+    if (isElective(item.id)) return globalElecMax;
+    return 25; // default for standard classes
   };
 
   const minSize = item => {
-    if (item.minSize && parseInt(item.minSize) > 0) return parseInt(item.minSize);
+    const explicit = parseInt(item.minSize);
+    if (!isNaN(explicit) && explicit > 0) return explicit;
     return isElective(item.id) ? globalElecMin : 0;
   };
 
   const maxPeriods = item => {
-    if (item.maxPeriods && parseInt(item.maxPeriods) > 0) return parseInt(item.maxPeriods);
+    const explicit = parseInt(item.maxPeriods);
+    if (!isNaN(explicit) && explicit > 0) return explicit;
     return isElective(item.id) ? globalElecMaxPeriods : Infinity;
   };
 
@@ -268,13 +272,27 @@ function runScheduler(state) {
           const rev = canAssign(cB, p1) && canAssign(cA, p2);
           if (fwd || rev) {
             const [c1, c2] = fwd ? [cA, cB] : [cB, cA];
-            schedule[p1] = c1.name; schedule[p2] = c2.name;
-            used.add(p1); used.add(p2);
-            if (getE(c1.id, p1) >= maxSize(c1)) console.error("PEAKS CAP VIOLATION:", c1.name, p1, getE(c1.id, p1), ">=", maxSize(c1));
-            if (getE(c2.id, p2) >= maxSize(c2)) console.error("PEAKS CAP VIOLATION:", c2.name, p2, getE(c2.id, p2), ">=", maxSize(c2));
-            addE(c1.id, p1); addE(c2.id, p2);
-            markSlot(c1.id, p1); markSlot(c2.id, p2);
-            stdCount += 2; placed = true;
+            // Double-check caps are not exceeded before assigning
+            const ms1 = maxSize(c1), ms2 = maxSize(c2);
+            if (getE(c1.id, p1) >= ms1 || getE(c2.id, p2) >= ms2) {
+              // Cap would be exceeded — try the other direction
+              const [d1, d2] = fwd ? [cB, cA] : [cA, cB];
+              const ms3 = maxSize(d1), ms4 = maxSize(d2);
+              if (getE(d1.id, p1) < ms3 && getE(d2.id, p2) < ms4) {
+                schedule[p1] = d1.name; schedule[p2] = d2.name;
+                used.add(p1); used.add(p2);
+                addE(d1.id, p1); addE(d2.id, p2);
+                markSlot(d1.id, p1); markSlot(d2.id, p2);
+                stdCount += 2; placed = true;
+              }
+              // else: neither direction works for this pair, continue to next pair
+            } else {
+              schedule[p1] = c1.name; schedule[p2] = c2.name;
+              used.add(p1); used.add(p2);
+              addE(c1.id, p1); addE(c2.id, p2);
+              markSlot(c1.id, p1); markSlot(c2.id, p2);
+              stdCount += 2; placed = true;
+            }
           }
         }
         if (!placed) {
