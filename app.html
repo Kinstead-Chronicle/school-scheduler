@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.5";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -270,6 +270,8 @@ function runScheduler(state) {
             const [c1, c2] = fwd ? [cA, cB] : [cB, cA];
             schedule[p1] = c1.name; schedule[p2] = c2.name;
             used.add(p1); used.add(p2);
+            if (getE(c1.id, p1) >= maxSize(c1)) console.error("PEAKS CAP VIOLATION:", c1.name, p1, getE(c1.id, p1), ">=", maxSize(c1));
+            if (getE(c2.id, p2) >= maxSize(c2)) console.error("PEAKS CAP VIOLATION:", c2.name, p2, getE(c2.id, p2), ">=", maxSize(c2));
             addE(c1.id, p1); addE(c2.id, p2);
             markSlot(c1.id, p1); markSlot(c2.id, p2);
             stdCount += 2; placed = true;
@@ -456,6 +458,23 @@ function runScheduler(state) {
     });
   });
   if (overCap.length) console.warn("Over-cap violations:", overCap.map(o => o.item.name + " " + o.pid + "=" + o.enrolled + "/" + o.cap));
+
+  // Check for students assigned the same class name in multiple periods
+  assignments.forEach(a => {
+    const classNames = Object.values(a.schedule).map(n => n.replace("[E] ",""));
+    const dupes = classNames.filter((n, i) => classNames.indexOf(n) !== i);
+    if (dupes.length) console.error("DUPLICATE CLASS for student", a.student.student_name, ":", dupes, a.schedule);
+  });
+
+  // Check for students with same class name appearing in export (different IDs, same name)
+  const classNameToIds = {};
+  [...classes, ...electives].forEach(item => {
+    if (!classNameToIds[item.name]) classNameToIds[item.name] = [];
+    classNameToIds[item.name].push(item.id);
+  });
+  Object.entries(classNameToIds).forEach(([name, ids]) => {
+    if (ids.length > 1) console.warn("DUPLICATE CLASS NAME:", name, "has", ids.length, "entries with IDs:", ids);
+  });
 
   // ── Post-run: check minimums ───────────────────────────────────────────────
   const allItems = [...classes, ...electives];
