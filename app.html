@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.2.7";
+const APP_VERSION = "1.3.0";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -565,22 +565,128 @@ function exportToExcel(result, state, runName) {
   const ws2 = XLSX.utils.aoa_to_sheet(rosterRows);
   ws2["!cols"] = [{ wch: 28 }, ...periods.map(() => ({ wch: 22 }))];
   XLSX.utils.book_append_sheet(wb, ws2, "Class Rosters");
-  const headers = ["Student Name", "Student ID", "Grade", "Designation", ...periods.map(p => p.label), "Elective 1", "Elective 2"];
+  const pLabels = periods.map(p => p.label + (p.startTime ? " (" + p.startTime + ")" : ""));
+  const headers = ["Student Name", "Student ID", "Grade", "Designation", ...pLabels, "Elective 1", "Elective 2", "PEAKS OK"];
+  const peaksNameSet = new Set((state.peaksPairs || []).flatMap(pp => {
+    const cA = state.classes.find(c => c.id === pp.classAId);
+    const cB = state.classes.find(c => c.id === pp.classBId);
+    return [cA && cA.name, cB && cB.name].filter(Boolean);
+  }));
+  const pids2 = periods.map(p => p.id);
   const rows = assignments.map(a => {
     const row = { "Student Name": a.student.student_name, "Student ID": a.student.student_id, "Grade": a.student.grade, "Designation": a.student.designation || "" };
-    periods.forEach(p => { row[p.label] = (a.schedule[p.id] || "-").replace("[E] ", ""); });
-    row["Elective 1"] = (a.electives && a.electives[0]) || a.elective || "UNASSIGNED"; row["Elective 2"] = (a.electives && a.electives[1]) || a.elective2 || "UNASSIGNED";
+    periods.forEach(p => { row[p.label + (p.startTime ? " (" + p.startTime + ")" : "")] = (a.schedule[p.id] || "-").replace("[E] ", ""); });
+    row["Elective 1"] = (a.electives && a.electives[0]) || a.elective || "UNASSIGNED";
+    row["Elective 2"] = (a.electives && a.electives[1]) || a.elective2 || "UNASSIGNED";
+    const peaksPids = pids2.filter(pid => a.schedule[pid] && peaksNameSet.has(a.schedule[pid]));
+    if (peaksPids.length === 2) {
+      const d = Math.abs(pids2.indexOf(peaksPids[0]) - pids2.indexOf(peaksPids[1]));
+      row["PEAKS OK"] = d === 1 ? "YES" : "NO (gap=" + d + ")";
+    } else { row["PEAKS OK"] = peaksPids.length === 0 ? "NO PEAKS" : "PARTIAL"; }
     return row;
   });
   const ws3 = XLSX.utils.json_to_sheet(rows, { header: headers });
-  ws3["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 20 }, ...periods.map(() => ({ wch: 20 })), { wch: 20 }];
+  ws3["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 24 }, ...periods.map(() => ({ wch: 22 })), { wch: 16 }, { wch: 16 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, ws3, "Per-Student Schedule");
-  if (result.conflicts && result.conflicts.length > 0) {
-    const cd = result.conflicts.map(c => ({ "Student Name": c.student.student_name, "Student ID": c.student.student_id, "Grade": c.student.grade, "Designation": c.student.designation || "", "Issue": c.reason, "Choices": c.choices ? c.choices.join(", ") : "" }));
-    const ws4 = XLSX.utils.json_to_sheet(cd);
-    ws4["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 20 }, { wch: 36 }, { wch: 60 }];
+
+  // Conflicts + under-minimum
+  const conflictRows = (result.conflicts || []).map(c => ({
+    "Student Name": c.student.student_name, "Student ID": c.student.student_id,
+    "Grade": c.student.grade, "Designation": c.student.designation || "",
+    "Type": c.partial ? "Partial (1 of 2)" : "Unassigned",
+    "Reason": c.reason, "Choices": c.choices ? c.choices.join(", ") : "", "Got": c.assigned ? c.assigned.join(", ") : ""
+  }));
+  if (result.underMin && result.underMin.length > 0) {
+    conflictRows.push({});
+    conflictRows.push({ "Student Name": "--- BELOW MINIMUM CLASSES ---" });
+    result.underMin.forEach(u => {
+      const pd = Object.entries(u.periodEnrollments || {}).map(([pid, cnt]) => { const p = periods.find(x => x.id === pid); return (p ? p.label : pid) + "=" + cnt; }).join(", ");
+      conflictRows.push({ "Student Name": u.item.name, "Type": "Below Min", "Reason": u.totalEnrolled + "/" + u.minSize + " (" + u.shortage + " short)", "Choices": pd });
+    });
+  }
+  if (conflictRows.length > 0) {
+    const ws4 = XLSX.utils.json_to_sheet(conflictRows);
+    ws4["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 8 }, { wch: 24 }, { wch: 16 }, { wch: 60 }, { wch: 50 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, ws4, "Conflicts");
   }
+
+  // Demand summary
+  const demandMap = {};
+  (state.students || []).forEach(s => {
+    const seen = new Set();
+    for (let i = 1; i <= 12; i++) {
+      const v = s["choice_" + i];
+      if (v && v.trim() && !seen.has(v.trim().toLowerCase())) {
+        seen.add(v.trim().toLowerCase());
+        if (!demandMap[v.trim()]) demandMap[v.trim()] = { total: 0, first: 0 };
+        demandMap[v.trim()].total++;
+        if (i === 1) demandMap[v.trim()].first++;
+      }
+    }
+  });
+  const demandRows = Object.entries(demandMap).sort((a, b) => b[1].total - a[1].total).map(([name, d]) => {
+    const el = (state.electives || []).find(e => e.name.toLowerCase() === name.toLowerCase());
+    const ms = el ? (parseInt(el.maxSize) || parseInt((state.electiveDefaults||{}).maxSize) || 25) : (parseInt((state.electiveDefaults||{}).maxSize) || 25);
+    return { "Elective": name, "Total Demand": d.total, "1st Choice": d.first, "Configured": el ? "YES" : "NO", "Max Size": el ? (el.maxSize || "(default)") : "-", "Max Periods": el ? (el.maxPeriods || "-") : "-", "Sections Needed": Math.ceil(d.total / ms), "Assigned": assignments.filter(a => (a.electives || []).some(e => e.toLowerCase() === name.toLowerCase())).length };
+  });
+  const ws5 = XLSX.utils.json_to_sheet(demandRows);
+  ws5["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, ws5, "Demand Summary");
+  // ── Config sheet ────────────────────────────────────────────────────────────
+  const cfgRows = [
+    ["SCHOOL CONFIGURATION"],
+    ["School Name", state.schoolName || ""],
+    ["Periods", state.periods.length],
+    [],
+    ["PERIOD SCHEDULE"],
+    ["Period", "Label", "Start", "End"],
+    ...state.periods.map(p => [p.id, p.label, p.startTime || "", p.endTime || ""]),
+    [],
+    ["GLOBAL ELECTIVE DEFAULTS"],
+    ["Default Max Size", (state.electiveDefaults || {}).maxSize || "25"],
+    ["Default Min Size", (state.electiveDefaults || {}).minSize || "-"],
+    ["Default Max Periods", (state.electiveDefaults || {}).maxPeriods || "-"],
+    [],
+    ["STANDARD CLASSES"],
+    ["Name", "Grades", "Category", "Max Size", "Min Size", "Max Periods", "Period Hints", "PEAKS Pair"],
+    ...state.classes.map(c => {
+      const grades = c.grades && c.grades.length < 3 ? c.grades.join(", ") : "All";
+      const hints = (c.periods || "").split(",").filter(Boolean).map(pid => {
+        const p = state.periods.find(x => x.id === pid);
+        return p ? p.label : pid;
+      }).join(", ") || "-";
+      const isPeaks = (state.peaksPairs || []).some(pp => pp.classAId === c.id || pp.classBId === c.id) ? "YES" : "";
+      return [c.name, grades, c.category || "-", c.maxSize || "25", c.minSize || "-", c.maxPeriods || "-", hints, isPeaks];
+    }),
+    [],
+    ["PEAKS PAIRS"],
+    ["Grade", "Class A (ELA)", "Class B (History)"],
+    ...(state.peaksPairs || []).map(pp => {
+      const cA = state.classes.find(c => c.id === pp.classAId);
+      const cB = state.classes.find(c => c.id === pp.classBId);
+      return [pp.gradeLevel + "th Grade", cA ? cA.name : pp.classAId, cB ? cB.name : pp.classBId];
+    }),
+    [],
+    ["ELECTIVES"],
+    ["Name", "Type", "Max Size", "Min Size", "Max Periods", "Period Hints", "Grade Restriction", "Intervention"],
+    ...state.electives.map(e => {
+      const type = e.isElaIntervention || e.isMathIntervention ? "Intervention" : e.isYearLong ? "Year-Long" : "Semester";
+      const hints = (e.availablePeriods || "").split(",").filter(Boolean).map(pid => {
+        const p = state.periods.find(x => x.id === pid);
+        return p ? p.label : pid;
+      }).join(", ") || "-";
+      const intervention = e.isElaIntervention ? "ELA" : e.isMathIntervention ? "Math" : "";
+      return [e.name, type, e.maxSize || "-", e.minSize || "-", e.maxPeriods || "-", hints, e.gradeRestriction ? e.gradeRestriction + "th only" : "All", intervention];
+    }),
+  ];
+  const wsCfg = XLSX.utils.aoa_to_sheet(cfgRows);
+  wsCfg["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 24 }, { wch: 12 }];
+  // Bold section headers
+  ["A1","A5","A13","A18","A26"].forEach(cell => {
+    if (wsCfg[cell]) wsCfg[cell].s = { font: { bold: true } };
+  });
+  XLSX.utils.book_append_sheet(wb, wsCfg, "Configuration");
+
   XLSX.writeFile(wb, runName + ".xlsx");
 }
 
@@ -645,27 +751,19 @@ function ClassesPage({ state, setState }) {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const [pairForm, setPairForm] = useState({ gradeLevel: "6", classAId: "", classBId: "" });
-  const openAdd = () => { setEditing(null); setForm(tab === "standard" ? { name: "", grades: ["6","7","8"], periods: [] } : { name: "", availablePeriods: [], maxSize: "25", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false }); setShowModal(true); };
+  const openAdd = () => { setEditing(null); setForm({ name: "", grades: ["6","7","8"], periods: [] }); setShowModal(true); };
   const openEdit = item => {
     setEditing(item.id);
-    if (tab === "standard") {
-      let grades = item.grades || (item.gradeLevel && item.gradeLevel !== "all" ? [item.gradeLevel] : ["6","7","8"]);
-      setForm({ ...item, grades, periods: (item.periods || "").split(",").map(x => x.trim()).filter(Boolean) });
-    }
-    else setForm({ ...item, availablePeriods: (item.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean) });
+    let grades = item.grades || (item.gradeLevel && item.gradeLevel !== "all" ? [item.gradeLevel] : ["6","7","8"]);
+    setForm({ ...item, grades, periods: (item.periods || "").split(",").map(x => x.trim()).filter(Boolean) });
     setShowModal(true);
   };
   const save = () => {
-    if (tab === "standard") {
-      const item = { ...form, id: editing || "cls_" + Date.now(), periods: (form.periods || []).join(","), grades: form.grades || ["6","7","8"] };
-      setState(s => ({ ...s, classes: editing ? s.classes.map(c => c.id === editing ? item : c) : [...s.classes, item] }));
-    } else {
-      const item = { ...form, id: editing || "elec_" + Date.now(), availablePeriods: (form.availablePeriods || []).join(",") };
-      setState(s => ({ ...s, electives: editing ? s.electives.map(e => e.id === editing ? item : e) : [...s.electives, item] }));
-    }
+    const item = { ...form, id: editing || "cls_" + Date.now(), periods: (form.periods || []).join(","), grades: form.grades || ["6","7","8"] };
+    setState(s => ({ ...s, classes: editing ? s.classes.map(c => c.id === editing ? item : c) : [...s.classes, item] }));
     setShowModal(false);
   };
-  const remove = id => { if (tab === "standard") setState(s => ({ ...s, classes: s.classes.filter(c => c.id !== id) })); else setState(s => ({ ...s, electives: s.electives.filter(e => e.id !== id) })); };
+  const remove = id => setState(s => ({ ...s, classes: s.classes.filter(c => c.id !== id) }));
   const removePair = grade => setState(s => ({ ...s, peaksPairs: s.peaksPairs.filter(p => p.gradeLevel !== grade) }));
   const addPair = () => {
     if (!pairForm.classAId || !pairForm.classBId || pairForm.classAId === pairForm.classBId) return;
@@ -674,31 +772,25 @@ function ClassesPage({ state, setState }) {
     setPairForm({ gradeLevel: "6", classAId: "", classBId: "" });
   };
   const toggleP = pid => {
-    const key = tab === "standard" ? "periods" : "availablePeriods";
-    // Use functional update to avoid stale closure - always read latest form state
     setForm(f => {
-      const cur = f[key] || [];
-      return { ...f, [key]: cur.includes(pid) ? cur.filter(p => p !== pid) : [...cur, pid] };
+      const cur = f.periods || [];
+      return { ...f, periods: cur.includes(pid) ? cur.filter(p => p !== pid) : [...cur, pid] };
     });
   };
-  const clearPeriods = () => {
-    const key = tab === "standard" ? "periods" : "availablePeriods";
-    setForm(f => ({ ...f, [key]: [] }));
-  };
-  const curPeriods = (tab === "standard" ? form.periods : form.availablePeriods) || [];
-  const list = tab === "standard" ? classes : electives;
+  const clearPeriods = () => setForm(f => ({ ...f, periods: [] }));
+  const curPeriods = form.periods || [];
+  const list = classes;
   const getName = id => { const c = classes.find(x => x.id === id); return c ? c.name : id; };
   return (
     React.createElement("div", null,
       React.createElement("div", { className: "page-header" },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Classes"), React.createElement("div", { className: "page-sub" }, "Configure standard classes, electives, and PEAKS pairs")),
-          tab !== "peaks" && React.createElement("button", { className: "btn btn-primary", onClick: openAdd }, "+ Add " + (tab === "standard" ? "Class" : "Elective"))
+          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Standard Classes"), React.createElement("div", { className: "page-sub" }, "Configure standard classes and PEAKS pairs")),
+          tab === "standard" && React.createElement("button", { className: "btn btn-primary", onClick: openAdd }, "+ Add Class")
         )
       ),
       React.createElement("div", { className: "flex", style: { marginBottom: 16 } },
         React.createElement("button", { className: "btn " + (tab === "standard" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("standard") }, "Standard (" + classes.length + ")"),
-        React.createElement("button", { className: "btn " + (tab === "elective" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("elective") }, "Electives (" + electives.length + ")"),
         React.createElement("button", { className: "btn " + (tab === "peaks" ? "btn-primary" : "btn-ghost"), onClick: () => setTab("peaks") }, "PEAKS Pairs (" + peaksPairs.length + ")")
       ),
 
@@ -761,33 +853,7 @@ function ClassesPage({ state, setState }) {
         )
       ),
 
-      tab === "elective" && React.createElement("div", { className: "card", style: { borderColor: "rgba(79,200,255,0.3)" } },
-        React.createElement("div", { className: "card-title" }, "Global Elective Defaults"),
-        React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 12 } }, "Set the default min and max for all electives. Override individual electives below as needed."),
-        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "160px 160px 1fr", gap: 12, alignItems: "flex-end" } },
-          React.createElement("div", null,
-            React.createElement("label", null, "Default Max Size"),
-            React.createElement("input", { type: "number", min: "1", value: electiveDefaults.maxSize || "25", onChange: e => setState(s => ({ ...s, electiveDefaults: { ...(s.electiveDefaults || {}), maxSize: e.target.value } })) })
-          ),
-          React.createElement("div", null,
-            React.createElement("label", null, "Default Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
-            React.createElement("input", { type: "number", min: "0", value: electiveDefaults.minSize || "", onChange: e => setState(s => ({ ...s, electiveDefaults: { ...(s.electiveDefaults || {}), minSize: e.target.value } })), placeholder: "No minimum" })
-          ),
-          React.createElement("div", null,
-            React.createElement("button", { className: "btn btn-secondary", onClick: () => {
-              setState(s => ({
-                ...s,
-                electives: s.electives.map(e => ({
-                  ...e,
-                  maxSize: (s.electiveDefaults || {}).maxSize || "25",
-                  minSize: (s.electiveDefaults || {}).minSize || ""
-                }))
-              }));
-            }}, "Apply to All Electives")
-          )
-        )
-      ),
-      tab !== "peaks" && React.createElement("div", { className: "card" },
+      tab === "standard" && React.createElement("div", { className: "card" },
         list.length === 0 ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "Nothing yet"), React.createElement("div", { className: "empty-sub" }, "Click Add to get started")) :
         React.createElement("div", { style: { overflowX: "auto" } },
           React.createElement("table", null,
@@ -833,7 +899,7 @@ function ClassesPage({ state, setState }) {
                       )
                     : React.createElement("td", null, item.maxSize || "25"),
                   React.createElement("td", { style: { fontSize: 11 } },
-                    (tab === "standard" ? (item.periods || "") : (item.availablePeriods || "")).split(",").filter(Boolean).map(pid => {
+                    (item.periods || "").split(",").filter(Boolean).map(pid => {
                       const p = periods.find(x => x.id === pid);
                       return p
                         ? React.createElement("span", { key: pid, className: "tag tag-gray" }, p.label)
@@ -855,7 +921,7 @@ function ClassesPage({ state, setState }) {
 
       showModal && React.createElement("div", { className: "modal-overlay", onClick: e => e.target === e.currentTarget && setShowModal(false) },
         React.createElement("div", { className: "modal" },
-          React.createElement("div", { className: "modal-title" }, (editing ? "Edit " : "Add ") + (tab === "standard" ? "Standard Class" : "Elective")),
+          React.createElement("div", { className: "modal-title" }, (editing ? "Edit " : "Add ") + "Standard Class"),
           React.createElement("div", { className: "flex-col" },
             React.createElement("div", null, React.createElement("label", null, "Name"), React.createElement("input", { value: form.name || "", onChange: e => setForm(f => ({ ...f, name: e.target.value })), placeholder: tab === "standard" ? "e.g. 6th Grade Math" : "e.g. Photography" })),
             tab === "standard" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 120px", gap: 12 } },
@@ -898,10 +964,7 @@ function ClassesPage({ state, setState }) {
                 )
               )
             ),
-            tab === "elective" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 } },
-              React.createElement("div", null, React.createElement("label", null, "Max Class Size"), React.createElement("input", { type: "number", value: form.maxSize || "25", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })) })),
-              React.createElement("div", null, React.createElement("label", null, "Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")), React.createElement("input", { type: "number", min: "0", value: form.minSize || "", onChange: e => setForm(f => ({ ...f, minSize: e.target.value })), placeholder: "No minimum" })),
-              React.createElement("div", null, React.createElement("label", null, "Max Periods ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")), React.createElement("input", { type: "number", min: "1", value: form.maxPeriods || "", onChange: e => setForm(f => ({ ...f, maxPeriods: e.target.value })), placeholder: "No limit" })),
+
               React.createElement("div", null,
                 React.createElement("label", null, "Grade Restriction"),
                 React.createElement("select", { value: form.gradeRestriction || "", onChange: e => setForm(f => ({ ...f, gradeRestriction: e.target.value })) },
@@ -912,11 +975,7 @@ function ClassesPage({ state, setState }) {
                 )
               )
             ),
-            tab === "elective" && React.createElement("div", { className: "flex", style: { flexWrap: "wrap" } },
-              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0, marginRight: 16 } }, React.createElement("input", { type: "checkbox", checked: form.isYearLong || false, onChange: e => setForm(f => ({ ...f, isYearLong: e.target.checked })), style: { width: "auto" } }), "Year-long"),
-              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0, marginRight: 16 } }, React.createElement("input", { type: "checkbox", checked: form.isElaIntervention || false, onChange: e => setForm(f => ({ ...f, isElaIntervention: e.target.checked })), style: { width: "auto" } }), "ELA Intervention"),
-              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0 } }, React.createElement("input", { type: "checkbox", checked: form.isMathIntervention || false, onChange: e => setForm(f => ({ ...f, isMathIntervention: e.target.checked })), style: { width: "auto" } }), "Math Intervention")
-            ),
+
             React.createElement("div", null,
               React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
                 React.createElement("label", { style: { marginBottom: 0 } }, "Period Hints ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
@@ -936,10 +995,466 @@ function ClassesPage({ state, setState }) {
           )
         )
       )
+  );
+}
+
+
+function AnalyzePage({ state, setState }) {
+  const { students = [], classes = [], electives = [], electiveDefaults = {}, peaksPairs = [] } = state;
+  const [accepted, setAccepted] = useState({});
+  const [applied, setApplied] = useState(false);
+
+  const globalMax = parseInt(electiveDefaults.maxSize) || 25;
+
+  // Grade counts
+  const gradeCounts = {};
+  students.forEach(s => { const g = s.grade; gradeCounts[g] = (gradeCounts[g] || 0) + 1; });
+
+  // Designation counts
+  const desigCounts = {};
+  students.forEach(s => { (s.designation || "").split("|").forEach(d => { d = d.trim(); if (d) desigCounts[d] = (desigCounts[d] || 0) + 1; }); });
+
+  // Elective demand from choices
+  const demand = {};
+  students.forEach(s => {
+    const seen = new Set();
+    for (let i = 1; i <= 12; i++) {
+      const v = s["choice_" + i];
+      if (v && v.trim() && !seen.has(v.trim().toLowerCase())) {
+        seen.add(v.trim().toLowerCase());
+        const key = v.trim();
+        if (!demand[key]) demand[key] = { name: key, count: 0, firstChoice: 0, students: [] };
+        demand[key].count++;
+        if (i === 1) demand[key].firstChoice++;
+        demand[key].students.push(s.student_name);
+      }
+    }
+  });
+
+  const demandList = Object.values(demand).sort((a, b) => b.count - a.count);
+
+  // Match against configured electives
+  const getStatus = (name) => {
+    const exact = electives.find(e => e.name.toLowerCase() === name.toLowerCase());
+    if (exact) return { type: "configured", elective: exact };
+    const fuzzy = electives.find(e => e.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(e.name.toLowerCase()));
+    if (fuzzy) return { type: "mismatch", elective: fuzzy, suggestion: fuzzy.name };
+    return { type: "missing" };
+  };
+
+  // Generate suggestion for an elective
+  const getSuggestion = (item) => {
+    const maxPeriods = Math.max(1, Math.ceil(item.count / globalMax));
+    const minSize = item.count < 8 ? null : Math.round(item.count / maxPeriods * 0.4);
+    return { maxPeriods, minSize, maxSize: globalMax };
+  };
+
+  // Initialize accepted state with all suggestions
+  const allSuggestions = {};
+  demandList.forEach(item => {
+    const status = getStatus(item.name);
+    const suggestion = getSuggestion(item);
+    allSuggestions[item.name] = { item, status, suggestion };
+  });
+
+  const toggleAccept = (name) => {
+    setApplied(false);
+    setAccepted(a => ({ ...a, [name]: !a[name] }));
+  };
+
+  const acceptAll = () => {
+    const all = {};
+    demandList.forEach(item => { all[item.name] = true; });
+    setAccepted(all);
+    setApplied(false);
+  };
+
+  const applyAccepted = () => {
+    let newElectives = [...electives];
+    Object.entries(accepted).forEach(([name, isAccepted]) => {
+      if (!isAccepted) return;
+      const { status, suggestion } = allSuggestions[name];
+      if (status.type === "configured") {
+        // Update existing elective
+        newElectives = newElectives.map(e =>
+          e.name.toLowerCase() === name.toLowerCase()
+            ? { ...e, maxPeriods: String(suggestion.maxPeriods), maxSize: String(suggestion.maxSize), minSize: suggestion.minSize ? String(suggestion.minSize) : e.minSize }
+            : e
+        );
+      } else if (status.type === "missing") {
+        // Add new elective
+        newElectives.push({
+          id: "elec_" + Date.now() + "_" + Math.random().toString(36).slice(2),
+          name,
+          maxSize: String(suggestion.maxSize),
+          minSize: suggestion.minSize ? String(suggestion.minSize) : "",
+          maxPeriods: String(suggestion.maxPeriods),
+          isYearLong: false,
+          availablePeriods: "",
+          gradeRestriction: "",
+          isElaIntervention: false,
+          isMathIntervention: false
+        });
+      } else if (status.type === "mismatch") {
+        // Update the fuzzy-matched elective
+        newElectives = newElectives.map(e =>
+          e.id === status.elective.id
+            ? { ...e, maxPeriods: String(suggestion.maxPeriods), maxSize: String(suggestion.maxSize) }
+            : e
+        );
+      }
+    });
+    setState(s => ({ ...s, electives: newElectives }));
+    setApplied(true);
+  };
+
+  const acceptedCount = Object.values(accepted).filter(Boolean).length;
+
+  const statusTag = (type) => {
+    if (type === "configured") return React.createElement("span", { className: "tag tag-green" }, "Configured");
+    if (type === "mismatch") return React.createElement("span", { className: "tag tag-yellow" }, "Name mismatch");
+    return React.createElement("span", { className: "tag tag-red" }, "Not configured");
+  };
+
+  return React.createElement("div", null,
+    React.createElement("div", { className: "page-header" },
+      React.createElement("div", { className: "page-title" }, "Analyze Student Data"),
+      React.createElement("div", { className: "page-sub" }, "Review demand from uploaded preferences and apply configuration suggestions")
+    ),
+
+    // Grade + designation summary
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 } },
+      React.createElement("div", { className: "card" },
+        React.createElement("div", { className: "card-title" }, "Students by Grade"),
+        React.createElement("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
+          Object.entries(gradeCounts).sort((a,b) => a[0].localeCompare(b[0])).map(([g, n]) =>
+            React.createElement("div", { key: g, className: "stat", style: { flex: "1", minWidth: 80, padding: 12 } },
+              React.createElement("div", { className: "stat-label" }, g + "th Grade"),
+              React.createElement("div", { className: "stat-value", style: { fontSize: 24 } }, n)
+            )
+          )
+        )
+      ),
+      React.createElement("div", { className: "card" },
+        React.createElement("div", { className: "card-title" }, "Designations"),
+        Object.keys(desigCounts).length === 0
+          ? React.createElement("div", { style: { color: "var(--text3)", fontSize: 12 } }, "No designations found")
+          : React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+              Object.entries(desigCounts).map(([d, n]) =>
+                React.createElement("div", { key: d, style: { background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 12px" } },
+                  React.createElement("div", { style: { fontSize: 11, color: "var(--text3)" } }, d),
+                  React.createElement("div", { style: { fontSize: 18, color: "var(--accent3)", fontFamily: "var(--serif)" } }, n)
+                )
+              )
+            )
+      )
+    ),
+
+    // Standard class section check
+    React.createElement("div", { className: "card", style: { marginBottom: 20 } },
+      React.createElement("div", { className: "card-title" }, "Standard Class Section Check"),
+      classes.length === 0
+        ? React.createElement("div", { style: { color: "var(--text3)", fontSize: 12 } }, "No standard classes configured yet")
+        : React.createElement("table", null,
+            React.createElement("thead", null, React.createElement("tr", null,
+              React.createElement("th", null, "Class"),
+              React.createElement("th", null, "Grades"),
+              React.createElement("th", null, "Students"),
+              React.createElement("th", null, "Max Size"),
+              React.createElement("th", null, "Max Periods"),
+              React.createElement("th", null, "Sections Needed"),
+              React.createElement("th", null, "Status")
+            )),
+            React.createElement("tbody", null,
+              classes.map(c => {
+                const grades = c.grades && c.grades.length > 0 ? c.grades : ["6","7","8"];
+                const studentCount = students.filter(s => grades.includes(String(s.grade))).length;
+                const ms = parseInt(c.maxSize) || 25;
+                const sectionsNeeded = Math.ceil(studentCount / ms);
+                const maxP = parseInt(c.maxPeriods) || null;
+                const ok = !maxP || maxP >= sectionsNeeded;
+                return React.createElement("tr", { key: c.id },
+                  React.createElement("td", { style: { color: "var(--text)" } }, c.name,
+                    peaksPairs.some(p => p.classAId === c.id || p.classBId === c.id) &&
+                    React.createElement("span", { className: "tag tag-yellow", style: { marginLeft: 6 } }, "PEAKS")
+                  ),
+                  React.createElement("td", null, grades.length === 3 ? "All" : grades.map(g => g + "th").join(", ")),
+                  React.createElement("td", null, studentCount),
+                  React.createElement("td", null, ms),
+                  React.createElement("td", null, maxP || React.createElement("span", { style: { color: "var(--text3)" } }, "No limit")),
+                  React.createElement("td", null, sectionsNeeded),
+                  React.createElement("td", null,
+                    !ok
+                      ? React.createElement("span", { className: "tag tag-red" }, "Need maxPeriods ≥ " + sectionsNeeded)
+                      : React.createElement("span", { className: "tag tag-green" }, "OK")
+                  )
+                );
+              })
+            )
+          )
+    ),
+
+    // Elective demand table
+    React.createElement("div", { className: "card" },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 } },
+        React.createElement("div", { className: "card-title", style: { marginBottom: 0 } }, "Elective Demand from Student Preferences"),
+        React.createElement("div", { className: "flex" },
+          React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: acceptAll }, "Accept All"),
+          acceptedCount > 0 && React.createElement("button", {
+            className: "btn btn-primary btn-sm",
+            onClick: applyAccepted
+          }, applied ? "Applied " + acceptedCount + " suggestions" : "Apply " + acceptedCount + " selected")
+        )
+      ),
+      applied && React.createElement("div", { className: "alert alert-success", style: { marginBottom: 12 } },
+        "Suggestions applied — review and adjust in the Electives step."
+      ),
+      demandList.length === 0
+        ? React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "empty-title" }, "No elective choices found"),
+            React.createElement("div", { className: "empty-sub" }, "Upload a CSV with choice_1 through choice_12 columns")
+          )
+        : React.createElement("table", null,
+            React.createElement("thead", null, React.createElement("tr", null,
+              React.createElement("th", null),
+              React.createElement("th", null, "Elective"),
+              React.createElement("th", null, "Demand"),
+              React.createElement("th", null, "1st Choice"),
+              React.createElement("th", null, "Status"),
+              React.createElement("th", null, "Suggested Max Periods"),
+              React.createElement("th", null, "Suggested Min"),
+              React.createElement("th", null, "Notes")
+            )),
+            React.createElement("tbody", null,
+              demandList.map(item => {
+                const { status, suggestion } = allSuggestions[item.name];
+                const isAcc = !!accepted[item.name];
+                return React.createElement("tr", { key: item.name, style: { opacity: item.count < 5 ? 0.6 : 1 } },
+                  React.createElement("td", null,
+                    React.createElement("input", { type: "checkbox", checked: isAcc, onChange: () => toggleAccept(item.name), style: { cursor: "pointer" } })
+                  ),
+                  React.createElement("td", { style: { color: "var(--text)", fontWeight: isAcc ? 500 : "normal" } }, item.name),
+                  React.createElement("td", null, item.count),
+                  React.createElement("td", null, item.firstChoice),
+                  React.createElement("td", null, statusTag(status.type),
+                    status.type === "mismatch" && React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", marginTop: 2 } }, "→ " + status.suggestion)
+                  ),
+                  React.createElement("td", null, React.createElement("span", { className: "tag tag-blue" }, suggestion.maxPeriods)),
+                  React.createElement("td", null, suggestion.minSize ? React.createElement("span", { className: "tag tag-gray" }, suggestion.minSize) : React.createElement("span", { style: { color: "var(--text3)" } }, "-")),
+                  React.createElement("td", { style: { fontSize: 11, color: "var(--text3)" } },
+                    item.count < 8 ? "Low demand" :
+                    item.count > globalMax * 3 ? "Very high demand" : ""
+                  )
+                );
+              })
+            )
+          )
     )
   );
 }
 
+function ElectivesPage({ state, setState }) {
+  const { electives = [], periods = [], electiveDefaults = { maxSize: "25", minSize: "", maxPeriods: "" } } = state;
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({});
+
+  const openAdd = () => {
+    setEditing(null);
+    setForm({ name: "", availablePeriods: [], maxSize: "", minSize: "", maxPeriods: "", isYearLong: false, gradeRestriction: "", isElaIntervention: false, isMathIntervention: false });
+    setShowModal(true);
+  };
+  const openEdit = item => {
+    setEditing(item.id);
+    setForm({ ...item, availablePeriods: (item.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean) });
+    setShowModal(true);
+  };
+  const save = () => {
+    const item = { ...form, id: editing || "elec_" + Date.now(), availablePeriods: (form.availablePeriods || []).join(",") };
+    setState(s => ({ ...s, electives: editing ? s.electives.map(e => e.id === editing ? item : e) : [...s.electives, item] }));
+    setShowModal(false);
+  };
+  const remove = id => setState(s => ({ ...s, electives: s.electives.filter(e => e.id !== id) }));
+  const toggleP = pid => {
+    setForm(f => {
+      const cur = f.availablePeriods || [];
+      return { ...f, availablePeriods: cur.includes(pid) ? cur.filter(p => p !== pid) : [...cur, pid] };
+    });
+  };
+
+  const effectiveMax = e => e.maxSize || electiveDefaults.maxSize || "25";
+  const effectiveMin = e => e.minSize || electiveDefaults.minSize || "";
+  const effectiveMaxP = e => e.maxPeriods || electiveDefaults.maxPeriods || "";
+
+  return React.createElement("div", null,
+    React.createElement("div", { className: "page-header" },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+        React.createElement("div", null,
+          React.createElement("div", { className: "page-title" }, "Electives"),
+          React.createElement("div", { className: "page-sub" }, "Configure electives — suggestions from Analyze step are pre-populated")
+        ),
+        React.createElement("button", { className: "btn btn-primary", onClick: openAdd }, "+ Add Elective")
+      )
+    ),
+
+    // Global defaults
+    React.createElement("div", { className: "card", style: { borderColor: "rgba(79,200,255,0.3)", marginBottom: 16 } },
+      React.createElement("div", { className: "card-title" }, "Global Elective Defaults"),
+      React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 12 } }, "Set defaults for all electives. Individual electives can override these."),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 12, alignItems: "flex-end" } },
+        React.createElement("div", null,
+          React.createElement("label", null, "Default Max Size"),
+          React.createElement("input", { type: "number", min: "1", value: electiveDefaults.maxSize || "25", onChange: e => setState(s => ({ ...s, electiveDefaults: { ...(s.electiveDefaults || {}), maxSize: e.target.value } })) })
+        ),
+        React.createElement("div", null,
+          React.createElement("label", null, "Default Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
+          React.createElement("input", { type: "number", min: "0", value: electiveDefaults.minSize || "", onChange: e => setState(s => ({ ...s, electiveDefaults: { ...(s.electiveDefaults || {}), minSize: e.target.value } })), placeholder: "No minimum" })
+        ),
+        React.createElement("div", null,
+          React.createElement("label", null, "Default Max Periods ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
+          React.createElement("input", { type: "number", min: "1", value: electiveDefaults.maxPeriods || "", onChange: e => setState(s => ({ ...s, electiveDefaults: { ...(s.electiveDefaults || {}), maxPeriods: e.target.value } })), placeholder: "No limit" })
+        ),
+        React.createElement("div", null,
+          React.createElement("button", { className: "btn btn-secondary", onClick: () => setState(s => ({ ...s, electives: s.electives.map(e => ({ ...e, maxSize: (s.electiveDefaults || {}).maxSize || "25", minSize: (s.electiveDefaults || {}).minSize || "", maxPeriods: (s.electiveDefaults || {}).maxPeriods || "" })) })) }, "Apply to All")
+        )
+      )
+    ),
+
+    // Electives table
+    React.createElement("div", { className: "card" },
+      electives.length === 0
+        ? React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "empty-title" }, "No electives yet"),
+            React.createElement("div", { className: "empty-sub" }, "Run Analyze step to get suggestions, or add manually")
+          )
+        : React.createElement("div", { style: { overflowX: "auto" } },
+            React.createElement("table", null,
+              React.createElement("thead", null, React.createElement("tr", null,
+                React.createElement("th", null, "Name"),
+                React.createElement("th", null, "Type"),
+                React.createElement("th", null, "Max"),
+                React.createElement("th", null, "Min"),
+                React.createElement("th", null, "Max Periods"),
+                React.createElement("th", null, "Period Hints"),
+                React.createElement("th", null)
+              )),
+              React.createElement("tbody", null,
+                electives.map(item =>
+                  React.createElement("tr", { key: item.id },
+                    React.createElement("td", { style: { color: "var(--text)" } }, item.name),
+                    React.createElement("td", null,
+                      item.isElaIntervention || item.isMathIntervention
+                        ? React.createElement("span", { className: "tag tag-red" }, "Intervention")
+                        : item.isYearLong
+                          ? React.createElement("span", { className: "tag tag-green" }, "Year-Long")
+                          : React.createElement("span", { className: "tag tag-blue" }, "Semester")
+                    ),
+                    React.createElement("td", null,
+                      item.maxSize
+                        ? item.maxSize
+                        : React.createElement("span", { style: { color: "var(--text3)" } }, (electiveDefaults.maxSize || "25") + " (def)")
+                    ),
+                    React.createElement("td", null,
+                      item.minSize
+                        ? item.minSize
+                        : electiveDefaults.minSize
+                          ? React.createElement("span", { style: { color: "var(--text3)" } }, electiveDefaults.minSize + " (def)")
+                          : React.createElement("span", { style: { color: "var(--text3)" } }, "-")
+                    ),
+                    React.createElement("td", null,
+                      item.maxPeriods
+                        ? React.createElement("span", { className: "tag tag-blue" }, item.maxPeriods)
+                        : electiveDefaults.maxPeriods
+                          ? React.createElement("span", { style: { color: "var(--text3)" } }, electiveDefaults.maxPeriods + " (def)")
+                          : React.createElement("span", { style: { color: "var(--text3)" } }, "-")
+                    ),
+                    React.createElement("td", { style: { fontSize: 11 } },
+                      (item.availablePeriods || "").split(",").filter(Boolean).map(pid => {
+                        const p = periods.find(x => x.id === pid);
+                        return p
+                          ? React.createElement("span", { key: pid, className: "tag tag-gray" }, p.label)
+                          : React.createElement("span", { key: pid, className: "tag tag-red", title: "Period not found: " + pid }, "? " + pid);
+                      })
+                    ),
+                    React.createElement("td", null,
+                      React.createElement("div", { className: "flex" },
+                        React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => openEdit(item) }, "Edit"),
+                        React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => remove(item.id) }, "Remove")
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+    ),
+
+    // Edit/Add modal
+    showModal && React.createElement("div", { className: "modal-overlay", onClick: e => e.target === e.currentTarget && setShowModal(false) },
+      React.createElement("div", { className: "modal" },
+        React.createElement("div", { className: "modal-title" }, (editing ? "Edit" : "Add") + " Elective"),
+        React.createElement("div", { className: "flex-col" },
+          React.createElement("div", null,
+            React.createElement("label", null, "Name"),
+            React.createElement("input", { value: form.name || "", onChange: e => setForm(f => ({ ...f, name: e.target.value })), placeholder: "e.g. Photography" })
+          ),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } },
+            React.createElement("div", null,
+              React.createElement("label", null, "Max Size"),
+              React.createElement("input", { type: "number", value: form.maxSize || "", onChange: e => setForm(f => ({ ...f, maxSize: e.target.value })), placeholder: electiveDefaults.maxSize || "25" })
+            ),
+            React.createElement("div", null,
+              React.createElement("label", null, "Min Size"),
+              React.createElement("input", { type: "number", min: "0", value: form.minSize || "", onChange: e => setForm(f => ({ ...f, minSize: e.target.value })), placeholder: "No minimum" })
+            ),
+            React.createElement("div", null,
+              React.createElement("label", null, "Max Periods"),
+              React.createElement("input", { type: "number", min: "1", value: form.maxPeriods || "", onChange: e => setForm(f => ({ ...f, maxPeriods: e.target.value })), placeholder: "No limit" })
+            )
+          ),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+            React.createElement("div", null,
+              React.createElement("label", null, "Grade Restriction"),
+              React.createElement("select", { value: form.gradeRestriction || "", onChange: e => setForm(f => ({ ...f, gradeRestriction: e.target.value })) },
+                React.createElement("option", { value: "" }, "All Grades"),
+                React.createElement("option", { value: "6" }, "6th Only"),
+                React.createElement("option", { value: "7" }, "7th Only"),
+                React.createElement("option", { value: "8" }, "8th Only")
+              )
+            ),
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end", paddingBottom: 2 } },
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0, fontSize: 12 } },
+                React.createElement("input", { type: "checkbox", checked: form.isYearLong || false, onChange: e => setForm(f => ({ ...f, isYearLong: e.target.checked })), style: { width: "auto" } }), "Year-long"
+              ),
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0, fontSize: 12 } },
+                React.createElement("input", { type: "checkbox", checked: form.isElaIntervention || false, onChange: e => setForm(f => ({ ...f, isElaIntervention: e.target.checked })), style: { width: "auto" } }), "ELA Intervention"
+              ),
+              React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 0, fontSize: 12 } },
+                React.createElement("input", { type: "checkbox", checked: form.isMathIntervention || false, onChange: e => setForm(f => ({ ...f, isMathIntervention: e.target.checked })), style: { width: "auto" } }), "Math Intervention"
+              )
+            )
+          ),
+          React.createElement("div", null,
+            React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
+              React.createElement("label", { style: { marginBottom: 0 } }, "Period Hints ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
+              (form.availablePeriods || []).length > 0 && React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => setForm(f => ({ ...f, availablePeriods: [] })) }, "Clear")
+            ),
+            React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+              periods.map(p => {
+                const selected = (form.availablePeriods || []).includes(p.id);
+                return React.createElement("button", { key: p.id, className: "btn btn-sm " + (selected ? "btn-primary" : "btn-ghost"), onClick: () => toggleP(p.id) }, p.label);
+              })
+            )
+          )
+        ),
+        React.createElement("div", { className: "modal-actions" },
+          React.createElement("button", { className: "btn btn-ghost", onClick: () => setShowModal(false) }, "Cancel"),
+          React.createElement("button", { className: "btn btn-primary", onClick: save, disabled: !form.name }, "Save")
+        )
+      )
+    )
+  );
+}
 
 function StudentsPage({ state, setState }) {
   const { students = [] } = state;
@@ -1346,12 +1861,14 @@ function App() {
       .then(d => { if (d.version && d.version !== APP_VERSION) setUpdateAvail(true); })
       .catch(() => {});
   }, []);
-  const STEPS = ["setup", "classes", "students", "schedule", "conflicts"];
-  const LABELS = { setup: "School Setup", classes: "Classes & Electives", students: "Students", schedule: "Run Schedule", conflicts: "Conflicts" };
+  const STEPS = ["setup", "classes", "students", "analyze", "electives", "schedule", "conflicts"];
+  const LABELS = { setup: "School Setup", classes: "Standard Classes", students: "Upload Students", analyze: "Analyze", electives: "Electives", schedule: "Run Schedule", conflicts: "Conflicts" };
   const isComplete = id => {
     if (id === "setup") return !!(state.schoolName && state.schoolName.trim() && state.periods.length > 0 && state.periods.every(p => p.startTime && p.endTime));
-    if (id === "classes") return state.classes.length > 0 && state.electives.length > 0 && (state.peaksPairs || []).length > 0;
+    if (id === "classes") return state.classes.length > 0;
     if (id === "students") return state.students.length > 0;
+    if (id === "analyze") return state.students.length > 0;
+    if (id === "electives") return state.electives.length > 0;
     if (id === "schedule") return state.runs.length > 0;
     return true;
   };
@@ -1373,12 +1890,14 @@ function App() {
           ),
           React.createElement("nav", { className: "nav" },
             React.createElement("div", { className: "nav-section" }, "Configure"),
-            React.createElement("div", { className: "nav-item " + (page === "setup" ? "active" : ""), onClick: () => setPage("setup") }, React.createElement("div", { className: "nav-dot" }), "School Setup", isComplete("setup") && page !== "setup" && React.createElement("span", { className: "nav-check" }, "v")),
-            React.createElement("div", { className: "nav-item " + (page === "classes" ? "active" : ""), onClick: () => setPage("classes") }, React.createElement("div", { className: "nav-dot" }), "Classes & Electives", isComplete("classes") && page !== "classes" && React.createElement("span", { className: "nav-check" }, "v")),
+            React.createElement("div", { className: "nav-item " + (page === "setup" ? "active" : ""), onClick: () => setPage("setup") }, React.createElement("div", { className: "nav-dot" }), "School Setup", isComplete("setup") && page !== "setup" && React.createElement("span", { className: "nav-check" }, "✓")),
+            React.createElement("div", { className: "nav-item " + (page === "classes" ? "active" : ""), onClick: () => setPage("classes") }, React.createElement("div", { className: "nav-dot" }), "Standard Classes", isComplete("classes") && page !== "classes" && React.createElement("span", { className: "nav-check" }, "✓")),
             React.createElement("div", { className: "nav-section" }, "Data"),
-            React.createElement("div", { className: "nav-item " + (page === "students" ? "active" : ""), onClick: () => setPage("students") }, React.createElement("div", { className: "nav-dot" }), "Students", isComplete("students") && page !== "students" && React.createElement("span", { className: "nav-check" }, "v")),
+            React.createElement("div", { className: "nav-item " + (page === "students" ? "active" : ""), onClick: () => setPage("students") }, React.createElement("div", { className: "nav-dot" }), "Upload Students", isComplete("students") && page !== "students" && React.createElement("span", { className: "nav-check" }, "✓")),
+            React.createElement("div", { className: "nav-item " + (page === "analyze" ? "active" : ""), onClick: () => setPage("analyze") }, React.createElement("div", { className: "nav-dot" }), "Analyze", isComplete("analyze") && page !== "analyze" && React.createElement("span", { className: "nav-check" }, "✓")),
+            React.createElement("div", { className: "nav-item " + (page === "electives" ? "active" : ""), onClick: () => setPage("electives") }, React.createElement("div", { className: "nav-dot" }), "Electives", isComplete("electives") && page !== "electives" && React.createElement("span", { className: "nav-check" }, "✓")),
             React.createElement("div", { className: "nav-section" }, "Schedule"),
-            React.createElement("div", { className: "nav-item " + (page === "schedule" ? "active" : ""), onClick: () => setPage("schedule") }, React.createElement("div", { className: "nav-dot" }), "Run Schedule", isComplete("schedule") && page !== "schedule" && React.createElement("span", { className: "nav-check" }, "v")),
+            React.createElement("div", { className: "nav-item " + (page === "schedule" ? "active" : ""), onClick: () => setPage("schedule") }, React.createElement("div", { className: "nav-dot" }), "Run Schedule", isComplete("schedule") && page !== "schedule" && React.createElement("span", { className: "nav-check" }, "✓")),
             React.createElement("div", { className: "nav-item " + (page === "conflicts" ? "active" : ""), onClick: () => setPage("conflicts") }, React.createElement("div", { className: "nav-dot" }), "Conflicts", conflictCount > 0 && React.createElement("span", { className: "nav-badge" }, conflictCount))
           ),
           React.createElement("div", { className: "sidebar-footer" }, React.createElement("div", null, "v" + APP_VERSION), React.createElement("div", { style: { marginTop: 2 } }, "School Scheduler"))
@@ -1387,6 +1906,8 @@ function App() {
           page === "setup" && React.createElement(SetupPage, { state: state, setState: setState }),
           page === "classes" && React.createElement(ClassesPage, { state: state, setState: setState }),
           page === "students" && React.createElement(StudentsPage, { state: state, setState: setState }),
+          page === "analyze" && React.createElement(AnalyzePage, { state: state, setState: setState }),
+          page === "electives" && React.createElement(ElectivesPage, { state: state, setState: setState }),
           page === "schedule" && React.createElement(SchedulePage, { state: state, setState: setState }),
           page === "conflicts" && React.createElement(ConflictsPage, { state: state, setState: setState }),
           page !== "conflicts" && nextPage && React.createElement("div", { className: "next-bar" },
