@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.4";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -1594,189 +1594,455 @@ function SchedulePage({ state, setState }) {
 }
 
 function ConflictsPage({ state, setState }) {
-  const { runs = [], electives = [], periods = [] } = state;
-  const [selRun, setSelRun] = useState(null);
-  const [overrides, setOverrides] = useState({});
-  const [caps, setCaps] = useState({});
-  const [autoRunning, setAutoRunning] = useState(false);
-  const [showClear, setShowClear] = useState(false);
-  const activeId = selRun || (runs[0] && runs[0].id);
-  const activeRun = runs.find(r => r.id === activeId);
-  const conflicts = (activeRun && activeRun.result && activeRun.result.conflicts) || [];
-  const sortedElectives = [...electives].filter(e => !e.isElaIntervention && !e.isMathIntervention).sort((a, b) => {
-    const ap = (a.availablePeriods || "").split(",").filter(Boolean).length || 99;
-    const bp = (b.availablePeriods || "").split(",").filter(Boolean).length || 99;
+  var runs = state.runs || [];
+  var electives = state.electives || [];
+  var classes = state.classes || [];
+  var periods = state.periods || [];
+  var peaksPairs = state.peaksPairs || [];
+
+  var selRunState = useState(null);
+  var selRun = selRunState[0];
+  var setSelRun = selRunState[1];
+
+  var overridesState = useState({});
+  var overrides = overridesState[0];
+  var setOverrides = overridesState[1];
+
+  var capsState = useState({});
+  var caps = capsState[0];
+  var setCaps = capsState[1];
+
+  var autoRunningState = useState(false);
+  var autoRunning = autoRunningState[0];
+  var setAutoRunning = autoRunningState[1];
+
+  var showClearState = useState(false);
+  var showClear = showClearState[0];
+  var setShowClear = showClearState[1];
+
+  var subTabState = useState("conflicts");
+  var subTab = subTabState[0];
+  var setSubTab = subTabState[1];
+
+  var editStudentIdState = useState(null);
+  var editStudentId = editStudentIdState[0];
+  var setEditStudentId = editStudentIdState[1];
+
+  var editScheduleState = useState(null);
+  var editSchedule = editScheduleState[0];
+  var setEditSchedule = editScheduleState[1];
+
+  var editSearchState = useState("");
+  var editSearch = editSearchState[0];
+  var setEditSearch = editSearchState[1];
+
+  var editSlotState = useState(null);
+  var editSlot = editSlotState[0];
+  var setEditSlot = editSlotState[1];
+
+  var activeId = selRun || (runs[0] && runs[0].id);
+  var activeRun = runs.find(function(r) { return r.id === activeId; });
+  var conflicts = (activeRun && activeRun.result && activeRun.result.conflicts) || [];
+
+  var sortedElectives = electives.filter(function(e) {
+    return !e.isElaIntervention && !e.isMathIntervention;
+  }).sort(function(a, b) {
+    var ap = (a.availablePeriods || "").split(",").filter(Boolean).length || 99;
+    var bp = (b.availablePeriods || "").split(",").filter(Boolean).length || 99;
     return ap - bp;
   });
-  const getInfo = name => {
-    const e = electives.find(el => el.name.toLowerCase() === name.toLowerCase());
+
+  function getInfo(name) {
+    var e = electives.find(function(el) { return el.name.toLowerCase() === name.toLowerCase(); });
     if (!e) return null;
-    const avail = (e.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
-    const pLabels = avail.map(pid => { const p = periods.find(x => x.id === pid); return p ? p.label + (p.startTime ? " (" + p.startTime + ")" : "") : pid; });
+    var avail = (e.availablePeriods || "").split(",").map(function(x) { return x.trim(); }).filter(Boolean);
+    var pLabels = avail.map(function(pid) {
+      var p = periods.find(function(x) { return x.id === pid; });
+      return p ? p.label + (p.startTime ? " (" + p.startTime + ")" : "") : pid;
+    });
     return { elective: e, periods: pLabels, periodIds: avail, cap: parseInt(e.maxSize) || 25 };
-  };
-  const reRun = () => {
-    const result = runScheduler(state);
-    const r = { id: "run_" + Date.now(), name: (activeRun ? activeRun.name : "Schedule") + "_resolved", date: new Date().toLocaleString(), totalStudents: state.students.length, conflicts: result.conflicts.length, assigned: state.students.length - result.conflicts.length, result };
-    setState(s => ({ ...s, runs: [r, ...s.runs] }));
-  };
-  const autoAssign = () => {
+  }
+
+  function reRun() {
+    var result = runScheduler(state);
+    var r = {
+      id: "run_" + Date.now(),
+      name: (activeRun ? activeRun.name : "Schedule") + "_resolved",
+      date: new Date().toLocaleString(),
+      totalStudents: state.students.length,
+      conflicts: result.conflicts.length,
+      assigned: state.students.length - result.conflicts.length,
+      underMin: (result.underMin || []).length,
+      result: result
+    };
+    setState(function(s) { return Object.assign({}, s, { runs: [r].concat(s.runs) }); });
+  }
+
+  function autoAssign() {
     setAutoRunning(true);
-    setTimeout(() => {
-      // Deep clone current run and electives to work on
-      let newElectives = state.electives.map(e => ({ ...e }));
-      let curRun = activeRun ? JSON.parse(JSON.stringify(activeRun)) : null;
+    setTimeout(function() {
+      var newElectives = electives.map(function(e) { return Object.assign({}, e); });
+      var curRun = activeRun ? JSON.parse(JSON.stringify(activeRun)) : null;
       if (!curRun) { setAutoRunning(false); return; }
 
-      // Track enrollment counts within this run so we don't double-book
-      const enrollCounts = {};
-      curRun.result.assignments.forEach(a => {
-        Object.entries(a.schedule).forEach(([pid, cls]) => {
-          const clean = cls.replace("[E] ", "");
-          const key = clean + "__" + pid;
+      var enrollCounts = {};
+      curRun.result.assignments.forEach(function(a) {
+        Object.entries(a.schedule).forEach(function(entry) {
+          var pid = entry[0], cls = entry[1];
+          var clean = cls.replace("[E] ", "");
+          var key = clean + "__" + pid;
           enrollCounts[key] = (enrollCounts[key] || 0) + 1;
         });
       });
 
-      curRun.result.conflicts.slice().forEach(c => {
-        const grade = parseInt(c.student.grade);
-        const sa = curRun.result.assignments.find(a => a.student.student_id === c.student.student_id);
+      curRun.result.conflicts.slice().forEach(function(c) {
+        var grade = parseInt(c.student.grade);
+        var sa = curRun.result.assignments.find(function(a) { return a.student.student_id === c.student.student_id; });
         if (!sa) return;
-        const pids = periods.map(p => p.id);
-        const alreadyAssigned = sa.electives || (sa.elective ? [sa.elective] : []);
-        let usedPids = Object.keys(sa.schedule);
-        let resolved = false;
+        var pids = periods.map(function(p) { return p.id; });
+        var alreadyAssigned = sa.electives || (sa.elective ? [sa.elective] : []);
+        var usedPids = Object.keys(sa.schedule);
+        var resolved = false;
 
-        // Try to fill up to 2 electives
-        for (const choice of (c.choices || [])) {
-          if (alreadyAssigned.length + (resolved ? 1 : 0) >= 2) break;
-          if (alreadyAssigned.includes(choice)) continue;
-          const eIdx = newElectives.findIndex(e =>
-            e.name.toLowerCase() === choice.toLowerCase() &&
-            !e.isElaIntervention && !e.isMathIntervention &&
-            (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade)
-          );
-          if (eIdx === -1) continue;
-          const oldCap = parseInt(newElectives[eIdx].maxSize) || 25;
-          newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(oldCap + 1) };
-          const newCap = oldCap + 1;
-          const el = newElectives[eIdx];
-          const avail = (el.availablePeriods || "").split(",").map(x => x.trim()).filter(Boolean);
-          const candidates = avail.length > 0 ? avail : pids;
-          const openP = candidates.find(p => {
-            if (usedPids.includes(p)) return false;
-            return (enrollCounts[el.name + "__" + p] || 0) < newCap;
+        (c.choices || []).forEach(function(choice) {
+          if (alreadyAssigned.length + (resolved ? 1 : 0) >= 2) return;
+          if (alreadyAssigned.includes(choice)) return;
+          var eIdx = newElectives.findIndex(function(e) {
+            return e.name.toLowerCase() === choice.toLowerCase() &&
+              !e.isElaIntervention && !e.isMathIntervention &&
+              (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade);
           });
+          if (eIdx === -1) return;
+          var oldCap = parseInt(newElectives[eIdx].maxSize) || 25;
+          newElectives[eIdx] = Object.assign({}, newElectives[eIdx], { maxSize: String(oldCap + 1) });
+          var newCap = oldCap + 1;
+          var el = newElectives[eIdx];
+          var avail = (el.availablePeriods || "").split(",").map(function(x) { return x.trim(); }).filter(Boolean);
+          var candidates = avail.length > 0 ? avail : pids;
+          var openP = null;
+          for (var i = 0; i < candidates.length; i++) {
+            var p = candidates[i];
+            if (!usedPids.includes(p) && (enrollCounts[el.name + "__" + p] || 0) < newCap) {
+              openP = p;
+              break;
+            }
+          }
           if (openP) {
-            curRun.result.assignments = curRun.result.assignments.map(a => {
+            curRun.result.assignments = curRun.result.assignments.map(function(a) {
               if (a.student.student_id !== c.student.student_id) return a;
-              const newElectivesList = [...(a.electives || (a.elective ? [a.elective] : [])), el.name];
-              return { ...a, elective: newElectivesList[0], elective2: newElectivesList[1], electives: newElectivesList, schedule: { ...a.schedule, [openP]: "[E] " + el.name }, conflicts: [] };
+              var newList = (a.electives || (a.elective ? [a.elective] : [])).concat([el.name]);
+              return Object.assign({}, a, {
+                elective: newList[0], elective2: newList[1], electives: newList,
+                schedule: Object.assign({}, a.schedule, { [openP]: "[E] " + el.name }),
+                conflicts: []
+              });
             });
             enrollCounts[el.name + "__" + openP] = (enrollCounts[el.name + "__" + openP] || 0) + 1;
-            usedPids = [...usedPids, openP];
+            usedPids = usedPids.concat([openP]);
             resolved = true;
           } else {
-            newElectives[eIdx] = { ...newElectives[eIdx], maxSize: String(oldCap) };
+            newElectives[eIdx] = Object.assign({}, newElectives[eIdx], { maxSize: String(oldCap) });
           }
-        }
+        });
+
         if (resolved) {
-          curRun.result.conflicts = curRun.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id);
+          curRun.result.conflicts = curRun.result.conflicts.filter(function(cf) {
+            return cf.student.student_id !== c.student.student_id;
+          });
         }
       });
 
-      const newId = "run_" + Date.now();
-      const updated = {
-        ...curRun,
+      var newId = "run_" + Date.now();
+      var updated = Object.assign({}, curRun, {
         id: newId,
         name: curRun.name + "_auto",
         date: new Date().toLocaleString(),
         conflicts: curRun.result.conflicts.length,
         assigned: state.students.length - curRun.result.conflicts.length
-      };
-      // Save updated run and switch view to it
-      setState(s => ({ ...s, electives: newElectives, runs: [updated, ...s.runs] }));
+      });
+      setState(function(s) { return Object.assign({}, s, { electives: newElectives, runs: [updated].concat(s.runs) }); });
       setSelRun(newId);
       setAutoRunning(false);
     }, 400);
-  };
-  const apply = (c, override, newCap, info) => {
-    setState(s => {
-      let newElectives = s.electives;
-      if (newCap !== undefined && info) newElectives = s.electives.map(e => e.id === info.elective.id ? { ...e, maxSize: String(newCap) } : e);
-      const newRuns = s.runs.map(r => {
-        if (r.id !== activeId) return r;
-        return { ...r, conflicts: r.conflicts - 1, assigned: r.assigned + 1, result: { ...r.result, assignments: r.result.assignments.map(a => { if (a.student.student_id !== c.student.student_id) return a; const op = periods.find(p => !a.schedule[p.id]); if (op) return { ...a, elective: override, schedule: { ...a.schedule, [op.id]: "[E] " + override } }; return { ...a, elective: override }; }), conflicts: r.result.conflicts.filter(cf => cf.student.student_id !== c.student.student_id) } };
-      });
-      return { ...s, electives: newElectives, runs: newRuns };
-    });
-    setOverrides(o => { const n = { ...o }; delete n[c.student.student_id]; return n; });
-    setCaps(cp => { const n = { ...cp }; delete n[c.student.student_id]; return n; });
-  };
-  return (
-    React.createElement("div", null,
-      showClear && React.createElement("div", { className: "modal-overlay", onClick: e => e.target === e.currentTarget && setShowClear(false) },
-        React.createElement("div", { className: "modal" },
-          React.createElement("div", { className: "modal-title" }, "Clear All Data"),
-          React.createElement("p", { style: { color: "var(--text2)", fontSize: 13, marginBottom: 12 } }, "This will delete everything - students, classes, periods, and all run history. Cannot be undone."),
-          React.createElement("div", { className: "alert alert-error" }, "This cannot be undone."),
-          React.createElement("div", { className: "modal-actions" },
-            React.createElement("button", { className: "btn btn-ghost", onClick: () => setShowClear(false) }, "Cancel"),
-            React.createElement("button", { className: "btn btn-danger", onClick: () => { setState(() => ({ ...BLANK })); setShowClear(false); } }, "Yes, Clear Everything")
-          )
-        )
-      ),
-      React.createElement("div", { className: "page-header" },
-        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-          React.createElement("div", null, React.createElement("div", { className: "page-title" }, "Conflicts"), React.createElement("div", { className: "page-sub" }, "Review and resolve scheduling conflicts")),
-          React.createElement("div", { className: "flex" },
-            runs.length > 1 && React.createElement("select", { style: { width: "auto" }, value: activeId || "", onChange: e => setSelRun(e.target.value) }, runs.map(r => React.createElement("option", { key: r.id, value: r.id }, r.name))),
-            conflicts.length > 0 && React.createElement("button", { className: "btn btn-secondary", onClick: autoAssign, disabled: autoRunning }, autoRunning ? "Running..." : "Auto-Assign"),
-            conflicts.length > 0 && React.createElement("button", { className: "btn btn-primary", onClick: reRun }, "Re-run Schedule"),
-            React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => setShowClear(true) }, "Clear All Data")
-          )
-        )
-      ),
-      conflicts.length > 0 && React.createElement("div", { className: "alert alert-info", style: { marginBottom: 16 } }, "Auto-Assign will bump caps by 1 for each student's top choice and re-run. You can also resolve manually below."),
-      !activeRun && React.createElement("div", { className: "empty" }, React.createElement("div", { className: "empty-title" }, "No runs yet"), React.createElement("div", { className: "empty-sub" }, "Run the scheduler first")),
-      activeRun && conflicts.length === 0 && React.createElement("div", { className: "alert alert-success" }, "No conflicts - all students assigned successfully."),
+  }
 
+  function apply(c, override, newCap, info) {
+    setState(function(s) {
+      var newElectives = s.electives;
+      if (newCap !== undefined && info) {
+        newElectives = s.electives.map(function(e) {
+          return e.id === info.elective.id ? Object.assign({}, e, { maxSize: String(newCap) }) : e;
+        });
+      }
+      var newRuns = s.runs.map(function(r) {
+        if (r.id !== activeId) return r;
+        return Object.assign({}, r, {
+          conflicts: r.conflicts - 1,
+          assigned: r.assigned + 1,
+          result: Object.assign({}, r.result, {
+            assignments: r.result.assignments.map(function(a) {
+              if (a.student.student_id !== c.student.student_id) return a;
+              var op = periods.find(function(p) { return !a.schedule[p.id]; });
+              if (op) return Object.assign({}, a, { elective: override, schedule: Object.assign({}, a.schedule, { [op.id]: "[E] " + override }) });
+              return Object.assign({}, a, { elective: override });
+            }),
+            conflicts: r.result.conflicts.filter(function(cf) { return cf.student.student_id !== c.student.student_id; })
+          })
+        });
+      });
+      return Object.assign({}, s, { electives: newElectives, runs: newRuns });
+    });
+    setOverrides(function(o) { var n = Object.assign({}, o); delete n[c.student.student_id]; return n; });
+    setCaps(function(cp) { var n = Object.assign({}, cp); delete n[c.student.student_id]; return n; });
+  }
+
+  // ── Student editor helpers ──────────────────────────────────────────────────
+  function loadStudentForEdit(sid) {
+    var a = activeRun && activeRun.result.assignments.find(function(x) { return x.student.student_id === sid; });
+    if (!a) return;
+    setEditStudentId(sid);
+    setEditSchedule(Object.assign({}, a.schedule));
+    setEditSlot(null);
+  }
+
+  function saveStudentEdit() {
+    if (!editStudentId || !editSchedule || !activeRun) return;
+    setState(function(s) {
+      return Object.assign({}, s, {
+        runs: s.runs.map(function(r) {
+          if (r.id !== activeId) return r;
+          var updatedAssignments = r.result.assignments.map(function(a) {
+            if (a.student.student_id !== editStudentId) return a;
+            var merged = Object.assign({}, a.schedule, editSchedule);
+            var newElecs = Object.values(merged).filter(function(v) { return v && v.startsWith("[E] "); }).map(function(v) { return v.replace("[E] ", ""); });
+            return Object.assign({}, a, { schedule: merged, electives: newElecs, elective: newElecs[0] || null, elective2: newElecs[1] || null, conflicts: newElecs.length < 2 ? ["manual"] : [] });
+          });
+          var newConflictCount = updatedAssignments.filter(function(a) { return a.conflicts && a.conflicts.length > 0; }).length;
+          return Object.assign({}, r, {
+            conflicts: newConflictCount,
+            assigned: s.students.length - newConflictCount,
+            result: Object.assign({}, r.result, { assignments: updatedAssignments })
+          });
+        })
+      });
+    });
+    setEditStudentId(null);
+    setEditSchedule(null);
+    setEditSlot(null);
+  }
+
+  function validateSchedule(sched) {
+    var issues = [];
+    if (!sched || !activeRun || !editStudentId) return issues;
+    var a = activeRun.result.assignments.find(function(x) { return x.student.student_id === editStudentId; });
+    if (!a) return issues;
+    var grade = parseInt(a.student.grade);
+    var schedVals = Object.values(sched).filter(Boolean);
+    var assignedElectives = schedVals.filter(function(v) { return v && v.startsWith("[E] "); });
+    if (assignedElectives.length < 2) {
+      issues.push({ type: "warn", msg: "Missing Elective " + (assignedElectives.length + 1) });
+    }
+    var stdCount = schedVals.filter(function(v) { return v && !v.startsWith("[E] "); }).length;
+    if (stdCount < 4) {
+      issues.push({ type: "warn", msg: "Only " + stdCount + " of 4 standard class periods filled" });
+    }
+    var gradePair = peaksPairs.find(function(p) { return p.gradeLevel === String(grade); });
+    if (gradePair) {
+      var cA = classes.find(function(c) { return c.id === gradePair.classAId; });
+      var cB = classes.find(function(c) { return c.id === gradePair.classBId; });
+      var pids = periods.map(function(p) { return p.id; });
+      var hasA = cA && schedVals.includes(cA.name);
+      var hasB = cB && schedVals.includes(cB.name);
+      if (!hasA || !hasB) {
+        issues.push({ type: "error", msg: "Missing PEAKS class" });
+      } else {
+        var pidA = null, pidB = null;
+        Object.entries(sched).forEach(function(kv) {
+          if (cA && kv[1] === cA.name) pidA = kv[0];
+          if (cB && kv[1] === cB.name) pidB = kv[0];
+        });
+        if (pidA && pidB) {
+          var diff = Math.abs(pids.indexOf(pidA) - pids.indexOf(pidB));
+          if (diff !== 1) issues.push({ type: "error", msg: "PEAKS not consecutive (gap=" + diff + ")" });
+        }
+      }
+    }
+    return issues;
+  }
+
+  // ── Render student editor ───────────────────────────────────────────────────
+  function renderEditor() {
+    if (!editStudentId || !activeRun) return null;
+    var a = activeRun.result.assignments.find(function(x) { return x.student.student_id === editStudentId; });
+    if (!a) return null;
+    var sched = editSchedule || {};
+    var validation = validateSchedule(sched);
+    var errors = validation.filter(function(v) { return v.type === "error"; });
+    var warns = validation.filter(function(v) { return v.type === "warn"; });
+    var hasChanges = JSON.stringify(editSchedule) !== JSON.stringify(a.schedule);
+    var grade = parseInt(a.student.grade);
+
+    return React.createElement("div", null,
+      React.createElement("div", { className: "card", style: { borderColor: "rgba(79,200,255,0.3)", marginBottom: 12 } },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          React.createElement("div", null,
+            React.createElement("div", { style: { color: "var(--text)", fontSize: 15, fontWeight: 500 } }, a.student.student_name),
+            React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 2 } },
+              "Grade " + a.student.grade + " — ID: " + a.student.student_id + (a.student.designation ? " — " + a.student.designation : "")
+            )
+          ),
+          React.createElement("div", { className: "flex" },
+            React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: function() { setEditStudentId(null); setEditSchedule(null); setEditSlot(null); } }, "Close"),
+            React.createElement("button", { className: "btn btn-secondary btn-sm", onClick: function() { setEditSchedule(Object.assign({}, a.schedule)); setEditSlot(null); } }, "Reset"),
+            React.createElement("button", { className: "btn btn-primary btn-sm", disabled: !hasChanges, onClick: saveStudentEdit }, hasChanges ? "Save Changes" : "No Changes")
+          )
+        )
+      ),
+      errors.length > 0 && React.createElement("div", { className: "alert alert-error", style: { marginBottom: 8 } }, errors.map(function(e) { return e.msg; }).join(" · ")),
+      warns.length > 0 && React.createElement("div", { className: "alert alert-warn", style: { marginBottom: 12 } }, warns.map(function(w) { return w.msg; }).join(" · ")),
+      errors.length === 0 && warns.length === 0 && React.createElement("div", { className: "alert alert-success", style: { marginBottom: 12 } }, "Schedule looks complete"),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 16 } },
+        periods.map(function(p) {
+          var val = sched[p.id];
+          var isEdit = editSlot === p.id;
+          var isElec = val && val.startsWith("[E] ");
+          var isEmpty = !val;
+          return React.createElement("div", {
+            key: p.id,
+            style: {
+              background: isEdit ? "rgba(79,200,255,0.1)" : isEmpty ? "rgba(255,107,107,0.05)" : isElec ? "rgba(126,240,162,0.08)" : "var(--surface2)",
+              border: "1px solid " + (isEdit ? "var(--accent2)" : isEmpty ? "rgba(255,107,107,0.3)" : isElec ? "rgba(126,240,162,0.2)" : "var(--border)"),
+              borderRadius: 8, padding: 12, cursor: "pointer"
+            },
+            onClick: function() { setEditSlot(isEdit ? null : p.id); }
+          },
+            React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase", marginBottom: 4 } }, p.label),
+            p.startTime && React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", marginBottom: 4 } }, p.startTime),
+            React.createElement("div", { style: { fontSize: 12, color: isEmpty ? "var(--danger)" : isElec ? "var(--accent)" : "var(--text)", fontWeight: 500 } },
+              val ? val.replace("[E] ", "") : "Empty"
+            ),
+            isElec && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "Elective"),
+            isEdit && React.createElement("div", { style: { fontSize: 9, color: "var(--accent2)", marginTop: 2 } }, "Editing...")
+          );
+        })
+      ),
+      editSlot && React.createElement("div", { className: "card", style: { marginBottom: 12, borderColor: "rgba(79,200,255,0.3)" } },
+        React.createElement("div", { className: "card-title" }, "Change " + (function() { var p = periods.find(function(p) { return p.id === editSlot; }); return p ? p.label : editSlot; })()),
+        React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "flex-end" } },
+          React.createElement("div", { style: { flex: 1 } },
+            React.createElement("select", {
+              value: sched[editSlot] || "",
+              onChange: function(ev) {
+                var newVal = ev.target.value;
+                var pid = editSlot;
+                setEditSchedule(function(prev) {
+                  var updated = Object.assign({}, prev);
+                  if (!newVal) { delete updated[pid]; } else { updated[pid] = newVal; }
+                  return updated;
+                });
+                setEditSlot(null);
+              },
+              style: { width: "100%" }
+            },
+              React.createElement("option", { value: "" }, "-- Remove / Empty --"),
+              React.createElement("optgroup", { label: "Standard Classes" },
+                classes.filter(function(c) {
+                  return c.grades && c.grades.length > 0
+                    ? c.grades.includes(String(grade))
+                    : (!c.gradeLevel || c.gradeLevel === "all" || c.gradeLevel === String(grade));
+                }).map(function(c) {
+                  return React.createElement("option", { key: c.id, value: c.name }, c.name);
+                })
+              ),
+              React.createElement("optgroup", { label: "Electives" },
+                electives.filter(function(e) {
+                  return !e.isElaIntervention && !e.isMathIntervention &&
+                    (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade);
+                }).map(function(e) {
+                  return React.createElement("option", { key: e.id, value: "[E] " + e.name }, e.name);
+                })
+              )
+            )
+          ),
+          React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: function() { setEditSlot(null); } }, "Cancel")
+        )
+      )
+    );
+  }
+
+  return React.createElement("div", null,
+    showClear && React.createElement("div", { className: "modal-overlay", onClick: function(e) { if (e.target === e.currentTarget) setShowClear(false); } },
+      React.createElement("div", { className: "modal" },
+        React.createElement("div", { className: "modal-title" }, "Clear All Data"),
+        React.createElement("p", { style: { color: "var(--text2)", fontSize: 13, marginBottom: 12 } }, "This will delete everything - students, classes, periods, and all run history. Cannot be undone."),
+        React.createElement("div", { className: "alert alert-error" }, "This cannot be undone."),
+        React.createElement("div", { className: "modal-actions" },
+          React.createElement("button", { className: "btn btn-ghost", onClick: function() { setShowClear(false); } }, "Cancel"),
+          React.createElement("button", { className: "btn btn-danger", onClick: function() { setState(function() { return Object.assign({}, { schoolName: "", lunchStart: "", lunchEnd: "", numPeriods: 6, periods: [], classes: [], electives: [], peaksPairs: [], electiveDefaults: { maxSize: "25", minSize: "", maxPeriods: "" }, students: [], runs: [] }); }); setShowClear(false); } }, "Yes, Clear Everything")
+        )
+      )
+    ),
+    React.createElement("div", { className: "page-header" },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+        React.createElement("div", null,
+          React.createElement("div", { className: "page-title" }, "Conflicts"),
+          React.createElement("div", { className: "page-sub" }, "Review and resolve scheduling conflicts")
+        ),
+        React.createElement("div", { className: "flex" },
+          runs.length > 1 && React.createElement("select", { style: { width: "auto" }, value: activeId || "", onChange: function(e) { setSelRun(e.target.value); } },
+            runs.map(function(r) { return React.createElement("option", { key: r.id, value: r.id }, r.name); })
+          ),
+          conflicts.length > 0 && React.createElement("button", { className: "btn btn-secondary", onClick: autoAssign, disabled: autoRunning }, autoRunning ? "Running..." : "Auto-Assign"),
+          conflicts.length > 0 && React.createElement("button", { className: "btn btn-primary", onClick: reRun }, "Re-run Schedule"),
+          React.createElement("button", { className: "btn btn-danger btn-sm", onClick: function() { setShowClear(true); } }, "Clear All Data")
+        )
+      )
+    ),
+
+    React.createElement("div", { className: "flex", style: { marginBottom: 16, borderBottom: "1px solid var(--border)", paddingBottom: 12 } },
+      React.createElement("button", { className: "btn " + (subTab === "conflicts" ? "btn-primary" : "btn-ghost"), onClick: function() { setSubTab("conflicts"); } },
+        "Conflicts" + (conflicts.length > 0 ? " (" + conflicts.length + ")" : "")
+      ),
+      React.createElement("button", { className: "btn " + (subTab === "editor" ? "btn-primary" : "btn-ghost"), onClick: function() { setSubTab("editor"); } },
+        "Edit Student Schedule"
+      )
+    ),
+
+    subTab === "conflicts" && React.createElement("div", null,
+      conflicts.length > 0 && React.createElement("div", { className: "alert alert-info", style: { marginBottom: 16 } }, "Auto-Assign will bump caps by 1 for each student's top choice. You can also resolve manually below."),
+      !activeRun && React.createElement("div", { className: "empty" },
+        React.createElement("div", { className: "empty-title" }, "No runs yet"),
+        React.createElement("div", { className: "empty-sub" }, "Run the scheduler first")
+      ),
+      activeRun && conflicts.length === 0 && React.createElement("div", { className: "alert alert-success" }, "No conflicts — all students assigned successfully."),
       activeRun && (activeRun.result.underMin || []).length > 0 && React.createElement("div", null,
         React.createElement("div", { style: { fontSize: 12, fontWeight: 500, color: "var(--accent3)", marginBottom: 10, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.08em" } }, "Classes Below Minimum Enrollment"),
-        React.createElement("div", { className: "alert alert-warn", style: { marginBottom: 12 } },
-          "The following classes did not reach their minimum enrollment. Re-run the scheduler to try to fill them, or adjust the minimum."
-        ),
-        (activeRun.result.underMin || []).map((u, i) =>
-          React.createElement("div", { key: i, style: { background: "var(--surface)", border: "1px solid rgba(255,181,71,0.3)", borderRadius: 8, padding: 16, marginBottom: 10 } },
+        React.createElement("div", { className: "alert alert-warn", style: { marginBottom: 12 } }, "The following classes did not reach their minimum enrollment."),
+        (activeRun.result.underMin || []).map(function(u, i) {
+          return React.createElement("div", { key: i, style: { background: "var(--surface)", border: "1px solid rgba(255,181,71,0.3)", borderRadius: 8, padding: 16, marginBottom: 10 } },
             React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
               React.createElement("div", null,
                 React.createElement("div", { style: { color: "var(--text)", fontWeight: 500 } }, u.item.name),
-                React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 2 } },
-                  u.totalEnrolled + " enrolled / " + u.minSize + " minimum required — " + (u.shortage || (u.minSize - u.totalEnrolled)) + " short"
-                )
+                React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 2 } }, u.totalEnrolled + " enrolled / " + u.minSize + " minimum — " + (u.shortage || (u.minSize - u.totalEnrolled)) + " short")
               ),
               React.createElement("div", { className: "flex" },
                 React.createElement("span", { className: "tag tag-yellow" }, (u.minSize - u.totalEnrolled) + " short"),
-                u.item.minAction === "reassign"
-                  ? React.createElement("span", { className: "tag tag-blue" }, "Auto-reassign on re-run")
-                  : React.createElement("span", { className: "tag tag-gray" }, "Manual review")
+                u.item.minAction === "reassign" ? React.createElement("span", { className: "tag tag-blue" }, "Auto-reassign") : React.createElement("span", { className: "tag tag-gray" }, "Manual review")
               )
             ),
-            React.createElement("div", { className: "progress-bar", style: { height: 6, background: "var(--surface3)", borderRadius: 3, overflow: "hidden" } },
-              React.createElement("div", { style: { height: "100%", width: Math.round((u.totalEnrolled / u.minSize) * 100) + "%", background: "var(--accent3)", borderRadius: 3, transition: "width 0.3s" } })
+            React.createElement("div", { style: { height: 6, background: "var(--surface3)", borderRadius: 3, overflow: "hidden" } },
+              React.createElement("div", { style: { height: "100%", width: Math.round((u.totalEnrolled / u.minSize) * 100) + "%", background: "var(--accent3)", borderRadius: 3 } })
             ),
-            React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", marginTop: 4 } },
-              Math.round((u.totalEnrolled / u.minSize) * 100) + "% of minimum met"
-            )
-          )
-        )
+            React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", marginTop: 4 } }, Math.round((u.totalEnrolled / u.minSize) * 100) + "% of minimum met")
+          );
+        })
       ),
-      conflicts.map((c, i) => {
-        const sel = overrides[c.student.student_id];
-        const info = sel ? getInfo(sel) : null;
-        const capOv = caps[c.student.student_id];
-        const sa = activeRun && activeRun.result && activeRun.result.assignments && activeRun.result.assignments.find(a => a.student.student_id === c.student.student_id);
-        const sched = sa ? sa.schedule : {};
+      conflicts.map(function(c, i) {
+        var sel = overrides[c.student.student_id];
+        var info = sel ? getInfo(sel) : null;
+        var capOv = caps[c.student.student_id];
+        var sa = activeRun && activeRun.result && activeRun.result.assignments && activeRun.result.assignments.find(function(a) { return a.student.student_id === c.student.student_id; });
+        var sched = sa ? sa.schedule : {};
         return React.createElement("div", { key: i, className: "conflict-card" },
           React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 } },
             React.createElement("div", null,
@@ -1788,8 +2054,8 @@ function ConflictsPage({ state, setState }) {
           React.createElement("div", { style: { marginBottom: 10 } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase", marginBottom: 6 } }, "Current Schedule"),
             React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
-              periods.map(p => {
-                const cls = sched[p.id];
+              periods.map(function(p) {
+                var cls = sched[p.id];
                 return React.createElement("div", { key: p.id, className: "period-pill " + (cls ? "" : "period-pill-empty") },
                   React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase" } }, p.label),
                   React.createElement("div", { style: { fontSize: 11, color: cls ? "var(--text)" : "var(--danger)", marginTop: 2 } }, cls ? cls.replace("[E] ", "") : "Empty"),
@@ -1799,14 +2065,18 @@ function ConflictsPage({ state, setState }) {
             )
           ),
           React.createElement("div", { style: { marginBottom: 10 } },
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "Reason: "),
+            React.createElement("span", { style: { fontSize: 11, color: "var(--text2)" } }, c.reason || "Unknown")
+          ),
+          React.createElement("div", { style: { marginBottom: 10 } },
             React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "Choices: "),
-            (c.choices || []).map(ch => React.createElement("span", { key: ch, className: "tag tag-gray" }, ch))
+            (c.choices || []).map(function(ch) { return React.createElement("span", { key: ch, className: "tag tag-gray" }, ch); })
           ),
           c.choices && c.choices.length > 0 && React.createElement("div", { style: { marginBottom: 12 } },
             React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", textTransform: "uppercase", marginBottom: 6 } }, "Elective Availability"),
             React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
-              c.choices.slice(0, 6).map(ch => {
-                const inf = getInfo(ch);
+              c.choices.slice(0, 6).map(function(ch) {
+                var inf = getInfo(ch);
                 if (!inf) return null;
                 return React.createElement("div", { key: ch, style: { background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 5, padding: "5px 10px" } },
                   React.createElement("div", { style: { fontSize: 11, color: "var(--text)", marginBottom: 2 } }, ch),
@@ -1817,31 +2087,68 @@ function ConflictsPage({ state, setState }) {
           ),
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 160px", gap: 12, marginBottom: 12 } },
             React.createElement("div", null,
-              React.createElement("label", null, "Assign elective (most constrained first)"),
-              React.createElement("select", { value: sel || "", onChange: e => { setOverrides(o => ({ ...o, [c.student.student_id]: e.target.value })); setCaps(cp => { const n = { ...cp }; delete n[c.student.student_id]; return n; }); } },
+              React.createElement("label", null, "Assign elective"),
+              React.createElement("select", { value: sel || "", onChange: function(e) { setOverrides(function(o) { return Object.assign({}, o, { [c.student.student_id]: e.target.value }); }); setCaps(function(cp) { var n = Object.assign({}, cp); delete n[c.student.student_id]; return n; }); } },
                 React.createElement("option", { value: "" }, "-- Select elective --"),
-                sortedElectives.map(e => {
-                  const ps = (e.availablePeriods || "").split(",").filter(Boolean);
-                  const lbl = ps.length === 1 ? " (" + (periods.find(p => p.id === ps[0]) ? periods.find(p => p.id === ps[0]).label : ps[0]) + " only)" : ps.length > 1 ? " (" + ps.length + " periods)" : " (any period)";
+                sortedElectives.map(function(e) {
+                  var ps = (e.availablePeriods || "").split(",").filter(Boolean);
+                  var lbl = ps.length === 1 ? " (P" + ps[0] + " only)" : ps.length > 1 ? " (" + ps.length + " periods)" : " (any period)";
                   return React.createElement("option", { key: e.id, value: e.name }, e.name + lbl);
                 })
               )
             ),
             info && React.createElement("div", null,
               React.createElement("label", null, "Adjust cap (current: " + info.cap + ")"),
-              React.createElement("input", { type: "number", min: "1", value: capOv !== undefined ? capOv : info.cap, onChange: e => setCaps(cp => ({ ...cp, [c.student.student_id]: parseInt(e.target.value) || info.cap })) })
+              React.createElement("input", { type: "number", min: "1", value: capOv !== undefined ? capOv : info.cap, onChange: function(e) { setCaps(function(cp) { return Object.assign({}, cp, { [c.student.student_id]: parseInt(e.target.value) || info.cap }); }); } })
             )
           ),
           info && React.createElement("div", { className: "alert alert-info", style: { marginBottom: 12 } },
-            React.createElement("strong", null, info.elective.name), " - ",
-            "Periods: " + (info.periods.length > 0 ? info.periods.join(", ") : "Any") + " - Cap: " + (capOv !== undefined ? capOv : info.cap),
-            capOv !== undefined && capOv !== info.cap && React.createElement("span", { style: { color: "var(--accent3)", marginLeft: 8 } }, " Cap will update on Apply")
+            info.elective.name + " — Periods: " + (info.periods.length > 0 ? info.periods.join(", ") : "Any") + " — Cap: " + (capOv !== undefined ? capOv : info.cap)
           ),
           React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
-            React.createElement("button", { className: "btn btn-primary btn-sm", disabled: !sel, onClick: () => apply(c, sel, capOv, info) }, "Apply")
+            React.createElement("button", { className: "btn btn-primary btn-sm", disabled: !sel, onClick: function() { apply(c, sel, capOv, info); } }, "Apply")
           )
         );
       })
+    ),
+
+    subTab === "editor" && React.createElement("div", null,
+      React.createElement("div", { className: "card", style: { marginBottom: 16 } },
+        React.createElement("div", { className: "card-title" }, "Find Student"),
+        React.createElement("input", {
+          value: editSearch,
+          onChange: function(e) { setEditSearch(e.target.value); },
+          placeholder: "Type student name or ID...",
+          style: { marginBottom: editSearch.length >= 2 ? 8 : 0 }
+        }),
+        editSearch.length >= 2 && React.createElement("div", { style: { maxHeight: 220, overflowY: "auto", background: "var(--surface2)", borderRadius: 6, border: "1px solid var(--border)" } },
+          (activeRun ? activeRun.result.assignments : [])
+            .filter(function(a) {
+              var q = editSearch.toLowerCase();
+              return a.student.student_name.toLowerCase().includes(q) || String(a.student.student_id).includes(q);
+            })
+            .slice(0, 15)
+            .map(function(a) {
+              var hasConflict = activeRun && activeRun.result.conflicts && activeRun.result.conflicts.some(function(c) { return c.student.student_id === a.student.student_id; });
+              var isEditing = a.student.student_id === editStudentId;
+              return React.createElement("div", {
+                key: a.student.student_id,
+                style: { padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", background: isEditing ? "rgba(79,200,255,0.08)" : "transparent" },
+                onClick: function() { loadStudentForEdit(a.student.student_id); setEditSearch(""); }
+              },
+                React.createElement("div", null,
+                  React.createElement("div", { style: { color: "var(--text)", fontSize: 13 } }, a.student.student_name),
+                  React.createElement("div", { style: { fontSize: 11, color: "var(--text3)" } }, "Grade " + a.student.grade + " — " + a.student.student_id + (a.student.designation ? " — " + a.student.designation : ""))
+                ),
+                React.createElement("div", { className: "flex" },
+                  hasConflict && React.createElement("span", { className: "tag tag-red" }, "Conflict"),
+                  isEditing && React.createElement("span", { className: "tag tag-blue" }, "Editing")
+                )
+              );
+            })
+        )
+      ),
+      renderEditor()
     )
   );
 }
