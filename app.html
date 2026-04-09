@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.2.6";
+const APP_VERSION = "1.2.7";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -258,69 +258,61 @@ function runScheduler(state) {
     const gradeClasses = classes.filter(matchGrade);
     const pairedIds = new Set(peaksPairs.flatMap(p => [p.classAId, p.classBId]));
 
-    // Step 1: PEAKS pair
+    // Step 1: PEAKS pair — sequential back-to-back assignment
+    // Assign classA to a period first (respecting its own cap), then
+    // find an adjacent period for classB. This avoids simultaneous
+    // cap-checking bugs from the old paired-assignment approach.
     const gradePair = peaksPairs.find(p => p.gradeLevel === String(grade));
     if (gradePair) {
       const cA = classes.find(c => c.id === gradePair.classAId);
       const cB = classes.find(c => c.id === gradePair.classBId);
       if (cA && cB) {
         let placed = false;
-        for (let i = 0; i < pids.length - 1 && !placed; i++) {
-          const p1 = pids[i], p2 = pids[i + 1];
-          if (used.has(p1) || used.has(p2)) continue;
-          const fwd = canAssign(cA, p1) && canAssign(cB, p2);
-          const rev = canAssign(cB, p1) && canAssign(cA, p2);
-          if (fwd || rev) {
-            const [c1, c2] = fwd ? [cA, cB] : [cB, cA];
-            // Double-check caps are not exceeded before assigning
-            const ms1 = maxSize(c1), ms2 = maxSize(c2);
-            if (getE(c1.id, p1) >= ms1 || getE(c2.id, p2) >= ms2) {
-              // Cap would be exceeded — try the other direction
-              const [d1, d2] = fwd ? [cB, cA] : [cA, cB];
-              const ms3 = maxSize(d1), ms4 = maxSize(d2);
-              if (getE(d1.id, p1) < ms3 && getE(d2.id, p2) < ms4) {
-                schedule[p1] = d1.name; schedule[p2] = d2.name;
-                used.add(p1); used.add(p2);
-                addE(d1.id, p1); addE(d2.id, p2);
-                markSlot(d1.id, p1); markSlot(d2.id, p2);
-                stdCount += 2; placed = true;
+        // Try each period as the first slot for cA or cB
+        for (let i = 0; i < pids.length && !placed; i++) {
+          const pFirst = pids[i];
+          if (used.has(pFirst)) continue;
+          // Try cA in pFirst, then find adjacent period for cB
+          if (canAssign(cA, pFirst)) {
+            // Look for adjacent period (before or after) for cB
+            const adjacent = [pids[i + 1], pids[i - 1]].filter(p => p && !used.has(p) && p !== pFirst);
+            for (const pSecond of adjacent) {
+              if (canAssign(cB, pSecond)) {
+                // Assign cA to pFirst, cB to pSecond
+                schedule[pFirst] = cA.name; schedule[pSecond] = cB.name;
+                used.add(pFirst); used.add(pSecond);
+                addE(cA.id, pFirst); addE(cB.id, pSecond);
+                markSlot(cA.id, pFirst); markSlot(cB.id, pSecond);
+                stdCount += 2; placed = true; break;
               }
-              // else: neither direction works for this pair, continue to next pair
-            } else {
-              schedule[p1] = c1.name; schedule[p2] = c2.name;
-              used.add(p1); used.add(p2);
-              addE(c1.id, p1); addE(c2.id, p2);
-              markSlot(c1.id, p1); markSlot(c2.id, p2);
-              stdCount += 2; placed = true;
+            }
+          }
+          if (placed) break;
+          // Try cB in pFirst, then find adjacent period for cA
+          if (canAssign(cB, pFirst)) {
+            const adjacent = [pids[i + 1], pids[i - 1]].filter(p => p && !used.has(p) && p !== pFirst);
+            for (const pSecond of adjacent) {
+              if (canAssign(cA, pSecond)) {
+                schedule[pFirst] = cB.name; schedule[pSecond] = cA.name;
+                used.add(pFirst); used.add(pSecond);
+                addE(cB.id, pFirst); addE(cA.id, pSecond);
+                markSlot(cB.id, pFirst); markSlot(cA.id, pSecond);
+                stdCount += 2; placed = true; break;
+              }
             }
           }
         }
+        // Fallback: if no consecutive pair found, place wherever both fit (no back-to-back guarantee)
         if (!placed) {
-          // Fallback: relax the fwd/rev preference but still respect caps
-          for (let i = 0; i < pids.length - 1; i++) {
-            const pa = pids[i], pb = pids[i+1];
-            if (used.has(pa) || used.has(pb)) continue;
-            const fwdOk = canAssign(cA, pa) && canAssign(cB, pb);
-            const revOk = canAssign(cB, pa) && canAssign(cA, pb);
-            if (fwdOk || revOk) {
-              const [c1, c2] = fwdOk ? [cA, cB] : [cB, cA];
-              schedule[pa] = c1.name; schedule[pb] = c2.name;
-              used.add(pa); used.add(pb);
-              addE(c1.id, pa); addE(c2.id, pb);
-              markSlot(c1.id, pa); markSlot(c2.id, pb);
-              stdCount += 2; placed = true; break;
-            }
-          }
-          // Last resort: ignore caps to avoid unscheduled student (will show in conflicts)
-          if (!placed) {
-            for (let i = 0; i < pids.length - 1; i++) {
-              if (!used.has(pids[i]) && !used.has(pids[i+1])) {
-                schedule[pids[i]] = cA.name; schedule[pids[i+1]] = cB.name;
-                used.add(pids[i]); used.add(pids[i+1]);
-                addE(cA.id, pids[i]); addE(cB.id, pids[i+1]);
-                markSlot(cA.id, pids[i]); markSlot(cB.id, pids[i+1]);
-                stdCount += 2; break;
-              }
+          const openA = pids.find(p => !used.has(p) && canAssign(cA, p));
+          if (openA) {
+            const openB = pids.find(p => !used.has(p) && p !== openA && canAssign(cB, p));
+            if (openB) {
+              schedule[openA] = cA.name; schedule[openB] = cB.name;
+              used.add(openA); used.add(openB);
+              addE(cA.id, openA); addE(cB.id, openB);
+              markSlot(cA.id, openA); markSlot(cB.id, openB);
+              stdCount += 2;
             }
           }
         }
@@ -804,7 +796,7 @@ function ClassesPage({ state, setState }) {
               tab === "standard" ? React.createElement("th", null, "Grade") : React.createElement("th", null, "Type"),
               tab === "standard" ? React.createElement("th", null, "Category") : React.createElement("th", null, "Max"),
               tab === "standard" ? React.createElement("th", null, "Max Size") : React.createElement("th", null, "Min"),
-              tab === "standard" ? React.createElement("th", null, "Flags") : React.createElement("th", null, ""),
+              tab === "standard" ? React.createElement("th", null, "Flags") : null,
               React.createElement("th", null, "Period Hints"),
               React.createElement("th", null)
             )),
