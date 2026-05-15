@@ -2325,6 +2325,12 @@ function ConflictsPage({ state, setState }) {
     if (!a) return issues;
     var grade = parseInt(a.student.grade);
     var schedVals = Object.values(sched).filter(Boolean);
+    // Duplicate detection — hard error
+    var nameCounts = {};
+    schedVals.forEach(function(v) { nameCounts[v] = (nameCounts[v] || 0) + 1; });
+    Object.entries(nameCounts).forEach(function(kv) {
+      if (kv[1] > 1) issues.push({ type: "error", msg: "\"" + kv[0].replace("[E] ", "") + "\" assigned " + kv[1] + "x" });
+    });
     var assignedElectives = schedVals.filter(function(v) { return v && v.startsWith("[E] "); });
     if (assignedElectives.length < 2) {
       issues.push({ type: "warn", msg: "Missing Elective " + (assignedElectives.length + 1) });
@@ -2369,6 +2375,31 @@ function ConflictsPage({ state, setState }) {
     var hasChanges = JSON.stringify(editSchedule) !== JSON.stringify(a.schedule);
     var grade = parseInt(a.student.grade);
 
+    // Build duplicate name set for grid highlighting
+    var dupNames = new Set();
+    var nameCts = {};
+    Object.values(sched).filter(Boolean).forEach(function(v) { nameCts[v] = (nameCts[v] || 0) + 1; });
+    Object.entries(nameCts).forEach(function(kv) { if (kv[1] > 1) dupNames.add(kv[0]); });
+
+    // Build student's ranked elective choices for dropdown ordering
+    var studentChoiceNames = [];
+    for (var ci = 1; ci <= 12; ci++) {
+      var cv = a.student["choice_" + ci];
+      if (cv && cv.trim()) studentChoiceNames.push(cv.trim().toLowerCase());
+    }
+    var eligibleElectives = electives.filter(function(e) {
+      return !e.isElaIntervention && !e.isMathIntervention &&
+        (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade);
+    });
+    var myChoiceElectives = eligibleElectives.filter(function(e) {
+      return studentChoiceNames.includes(e.name.toLowerCase());
+    }).sort(function(a, b) {
+      return studentChoiceNames.indexOf(a.name.toLowerCase()) - studentChoiceNames.indexOf(b.name.toLowerCase());
+    });
+    var otherElectives = eligibleElectives.filter(function(e) {
+      return !studentChoiceNames.includes(e.name.toLowerCase());
+    });
+
     return React.createElement("div", null,
       React.createElement("div", { className: "card", style: { borderColor: "rgba(79,200,255,0.3)", marginBottom: 12 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
@@ -2381,7 +2412,7 @@ function ConflictsPage({ state, setState }) {
           React.createElement("div", { className: "flex" },
             React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: function() { setEditStudentId(null); setEditSchedule(null); setEditSlot(null); } }, "Close"),
             React.createElement("button", { className: "btn btn-secondary btn-sm", onClick: function() { setEditSchedule(Object.assign({}, a.schedule)); setEditSlot(null); } }, "Reset"),
-            React.createElement("button", { className: "btn btn-primary btn-sm", disabled: !hasChanges, onClick: saveStudentEdit }, hasChanges ? "Save Changes" : "No Changes")
+            React.createElement("button", { className: "btn btn-primary btn-sm", disabled: !hasChanges || errors.length > 0, onClick: saveStudentEdit }, !hasChanges ? "No Changes" : errors.length > 0 ? "Fix Errors First" : "Save Changes")
           )
         )
       ),
@@ -2394,21 +2425,23 @@ function ConflictsPage({ state, setState }) {
           var isEdit = editSlot === p.id;
           var isElec = val && val.startsWith("[E] ");
           var isEmpty = !val;
+          var isDup = val && dupNames.has(val);
           return React.createElement("div", {
             key: p.id,
             style: {
-              background: isEdit ? "rgba(79,200,255,0.1)" : isEmpty ? "rgba(255,107,107,0.05)" : isElec ? "rgba(126,240,162,0.08)" : "var(--surface2)",
-              border: "1px solid " + (isEdit ? "var(--accent2)" : isEmpty ? "rgba(255,107,107,0.3)" : isElec ? "rgba(126,240,162,0.2)" : "var(--border)"),
+              background: isEdit ? "rgba(79,200,255,0.1)" : isDup ? "rgba(255,181,71,0.12)" : isEmpty ? "rgba(255,107,107,0.05)" : isElec ? "rgba(126,240,162,0.08)" : "var(--surface2)",
+              border: "1px solid " + (isEdit ? "var(--accent2)" : isDup ? "rgba(255,181,71,0.6)" : isEmpty ? "rgba(255,107,107,0.3)" : isElec ? "rgba(126,240,162,0.2)" : "var(--border)"),
               borderRadius: 8, padding: 12, cursor: "pointer"
             },
             onClick: function() { setEditSlot(isEdit ? null : p.id); }
           },
             React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase", marginBottom: 4 } }, p.label),
             p.startTime && React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", marginBottom: 4 } }, p.startTime),
-            React.createElement("div", { style: { fontSize: 12, color: isEmpty ? "var(--danger)" : isElec ? "var(--accent)" : "var(--text)", fontWeight: 500 } },
+            React.createElement("div", { style: { fontSize: 12, color: isDup ? "var(--accent3)" : isEmpty ? "var(--danger)" : isElec ? "var(--accent)" : "var(--text)", fontWeight: 500 } },
               val ? val.replace("[E] ", "") : "Empty"
             ),
-            isElec && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "Elective"),
+            isDup && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "⚠ Duplicate"),
+            !isDup && isElec && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "Elective"),
             isEdit && React.createElement("div", { style: { fontSize: 9, color: "var(--accent2)", marginTop: 2 } }, "Editing...")
           );
         })
@@ -2441,11 +2474,13 @@ function ConflictsPage({ state, setState }) {
                   return React.createElement("option", { key: c.id, value: c.name }, c.name);
                 })
               ),
-              React.createElement("optgroup", { label: "Electives" },
-                electives.filter(function(e) {
-                  return !e.isElaIntervention && !e.isMathIntervention &&
-                    (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade);
-                }).map(function(e) {
+              myChoiceElectives.length > 0 && React.createElement("optgroup", { label: "Their Choices" },
+                myChoiceElectives.map(function(e) {
+                  return React.createElement("option", { key: e.id, value: "[E] " + e.name }, e.name);
+                })
+              ),
+              otherElectives.length > 0 && React.createElement("optgroup", { label: "Other Electives (Override)" },
+                otherElectives.map(function(e) {
                   return React.createElement("option", { key: e.id, value: "[E] " + e.name }, e.name);
                 })
               )
