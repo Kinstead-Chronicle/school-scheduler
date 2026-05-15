@@ -418,8 +418,33 @@ function runScheduler(state) {
     const choices = getChoices(student);
     const assigned = [];
 
+    const elecSlotsUsed = () => Object.values(schedule).filter(v => v && v.startsWith("[E] ")).length;
+
+    const findSemPartner = (firstEl, pid) => {
+      // Try ranked choices first
+      for (const choice of choices) {
+        if (choice.toLowerCase() === firstEl.name.toLowerCase()) continue;
+        const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isYearLong && !e.isElaIntervention && !e.isMathIntervention);
+        if (!el) continue;
+        if (assigned.includes(el.name)) continue;
+        if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) continue;
+        const avail = electivePMap[el.id] || pids;
+        if (avail.includes(pid) && canAssignFor(el, pid, used)) return el;
+      }
+      // Fallback: any available semester elective
+      for (const el of electives) {
+        if (el.name.toLowerCase() === firstEl.name.toLowerCase()) continue;
+        if (el.isYearLong || el.isElaIntervention || el.isMathIntervention) continue;
+        if (assigned.includes(el.name)) continue;
+        if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) continue;
+        const avail = electivePMap[el.id] || pids;
+        if (avail.includes(pid) && canAssignFor(el, pid, used)) return el;
+      }
+      return null;
+    };
+
     const tryElective = (el, preferBusy) => {
-      if (assigned.length >= NUM_ELECTIVES) return false;
+      if (elecSlotsUsed() >= NUM_ELECTIVES) return false;
       if (!el || el.isElaIntervention || el.isMathIntervention) return false;
       if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return false;
       if (assigned.includes(el.name)) return false;
@@ -430,6 +455,28 @@ function runScheduler(state) {
       const open = preferBusy
         ? getBestSlot(el, openSlots)
         : openSlots[0];
+      if (!el.isYearLong) {
+        // Semester elective — pair with a partner in the same slot
+        const partner = findSemPartner(el, open);
+        if (partner) {
+          schedule[open] = "[E] " + el.name + " | " + partner.name;
+          assigned.push(el.name);
+          assigned.push(partner.name);
+          addE(el.id, open);
+          markSlot(el.id, open);
+          addE(partner.id, open);
+          markSlot(partner.id, open);
+        } else {
+          // No partner found — store solo (will be flagged by validation)
+          schedule[open] = "[E] " + el.name;
+          assigned.push(el.name);
+          addE(el.id, open);
+          markSlot(el.id, open);
+        }
+        used.add(open);
+        return true;
+      }
+      // Year-long elective — existing behavior
       schedule[open] = "[E] " + el.name;
       assigned.push(el.name);
       used.add(open);
@@ -471,14 +518,14 @@ function runScheduler(state) {
 
     // Pass 1: prioritize choices that are below minimum (concentrate students there)
     for (const choice of choices) {
-      if (assigned.length >= NUM_ELECTIVES) break;
+      if (elecSlotsUsed() >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
       if (el && isUnderMin(el)) tryElective(el, true);
     }
 
     // Pass 2: fill remaining slots by ranked preference
     for (const choice of choices) {
-      if (assigned.length >= NUM_ELECTIVES) break;
+      if (elecSlotsUsed() >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
       if (el) tryElective(el, false);
     }
@@ -538,7 +585,10 @@ function runScheduler(state) {
 
   // Check for students assigned the same class name in multiple periods
   assignments.forEach(a => {
-    const classNames = Object.values(a.schedule).map(n => n.replace("[E] ",""));
+    const classNames = Object.values(a.schedule).flatMap(n => {
+      const clean = n.replace("[E] ", "");
+      return clean.includes(" | ") ? clean.split(" | ").map(s => s.trim()) : [clean];
+    });
     const dupes = classNames.filter((n, i) => classNames.indexOf(n) !== i);
     if (dupes.length) console.error("DUPLICATE CLASS for student", a.student.student_name, ":", dupes, a.schedule);
   });
@@ -642,9 +692,10 @@ function exportToExcel(result, state, runName) {
   const pids2 = periods.map(p => p.id);
   const rows = assignments.map(a => {
     const row = { "Student Name": a.student.student_name, "Student ID": a.student.student_id, "Grade": a.student.grade, "Designation": a.student.designation || "" };
-    periods.forEach(p => { row[p.label + (p.startTime ? " (" + p.startTime + ")" : "")] = (a.schedule[p.id] || "-").replace("[E] ", ""); });
-    row["Elective 1"] = (a.electives && a.electives[0]) || a.elective || "UNASSIGNED";
-    row["Elective 2"] = (a.electives && a.electives[1]) || a.elective2 || "UNASSIGNED";
+    periods.forEach(p => { row[p.label + (p.startTime ? " (" + p.startTime + ")" : "")] = (a.schedule[p.id] || "-").replace("[E] ", "").replace(" | ", " / "); });
+    const elecPeriods = periods.filter(p => a.schedule[p.id] && a.schedule[p.id].startsWith("[E] "));
+    row["Elective 1"] = elecPeriods[0] ? a.schedule[elecPeriods[0].id].replace("[E] ", "").replace(" | ", " / ") : "UNASSIGNED";
+    row["Elective 2"] = elecPeriods[1] ? a.schedule[elecPeriods[1].id].replace("[E] ", "").replace(" | ", " / ") : "UNASSIGNED";
     const peaksPids = pids2.filter(pid => a.schedule[pid] && peaksNameSet.has(a.schedule[pid]));
     if (peaksPids.length === 2) {
       const d = Math.abs(pids2.indexOf(peaksPids[0]) - pids2.indexOf(peaksPids[1]));
@@ -2176,9 +2227,10 @@ function ConflictsPage({ state, setState }) {
       curRun.result.assignments.forEach(function(a) {
         Object.entries(a.schedule).forEach(function(entry) {
           var pid = entry[0], cls = entry[1];
-          var clean = cls.replace("[E] ", "");
-          var key = clean + "__" + pid;
-          enrollCounts[key] = (enrollCounts[key] || 0) + 1;
+          cls.replace("[E] ", "").split(" | ").forEach(function(name) {
+            var key = name.trim() + "__" + pid;
+            enrollCounts[key] = (enrollCounts[key] || 0) + 1;
+          });
         });
       });
 
@@ -2301,7 +2353,7 @@ function ConflictsPage({ state, setState }) {
           var updatedAssignments = r.result.assignments.map(function(a) {
             if (a.student.student_id !== editStudentId) return a;
             var merged = Object.assign({}, a.schedule, editSchedule);
-            var newElecs = Object.values(merged).filter(function(v) { return v && v.startsWith("[E] "); }).map(function(v) { return v.replace("[E] ", ""); });
+            var newElecs = Object.values(merged).filter(function(v) { return v && v.startsWith("[E] "); }).flatMap(function(v) { return v.replace("[E] ", "").split(" | ").map(function(n) { return n.trim(); }); });
             return Object.assign({}, a, { schedule: merged, electives: newElecs, elective: newElecs[0] || null, elective2: newElecs[1] || null, conflicts: newElecs.length < 2 ? ["manual"] : [] });
           });
           var newConflictCount = updatedAssignments.filter(function(a) { return a.conflicts && a.conflicts.length > 0; }).length;
@@ -2325,9 +2377,15 @@ function ConflictsPage({ state, setState }) {
     if (!a) return issues;
     var grade = parseInt(a.student.grade);
     var schedVals = Object.values(sched).filter(Boolean);
-    // Duplicate detection — hard error
+    // Duplicate detection — hard error (expand pairs first)
+    var expandedVals = [];
+    schedVals.forEach(function(v) {
+      if (v && v.startsWith("[E] ")) {
+        v.replace("[E] ", "").split(" | ").forEach(function(n) { expandedVals.push("[E] " + n.trim()); });
+      } else { expandedVals.push(v); }
+    });
     var nameCounts = {};
-    schedVals.forEach(function(v) { nameCounts[v] = (nameCounts[v] || 0) + 1; });
+    expandedVals.forEach(function(v) { nameCounts[v] = (nameCounts[v] || 0) + 1; });
     Object.entries(nameCounts).forEach(function(kv) {
       if (kv[1] > 1) issues.push({ type: "error", msg: "\"" + kv[0].replace("[E] ", "") + "\" assigned " + kv[1] + "x" });
     });
@@ -2335,6 +2393,16 @@ function ConflictsPage({ state, setState }) {
     if (assignedElectives.length < 2) {
       issues.push({ type: "warn", msg: "Missing Elective " + (assignedElectives.length + 1) });
     }
+    // Solo semester elective warning
+    schedVals.forEach(function(v) {
+      if (v && v.startsWith("[E] ") && !v.includes(" | ")) {
+        var name = v.replace("[E] ", "");
+        var el = electives.find(function(e) { return e.name.toLowerCase() === name.toLowerCase(); });
+        if (el && !el.isYearLong && !el.isElaIntervention && !el.isMathIntervention) {
+          issues.push({ type: "warn", msg: "\"" + name + "\" is semester-only — needs a partner" });
+        }
+      }
+    });
     var stdCount = schedVals.filter(function(v) { return v && !v.startsWith("[E] "); }).length;
     if (stdCount < 4) {
       issues.push({ type: "warn", msg: "Only " + stdCount + " of 4 standard class periods filled" });
@@ -2378,7 +2446,10 @@ function ConflictsPage({ state, setState }) {
     // Build duplicate name set for grid highlighting
     var dupNames = new Set();
     var nameCts = {};
-    Object.values(sched).filter(Boolean).forEach(function(v) { nameCts[v] = (nameCts[v] || 0) + 1; });
+    Object.values(sched).filter(Boolean).forEach(function(v) {
+      var parts = v.startsWith("[E] ") ? v.replace("[E] ", "").split(" | ").map(function(n) { return "[E] " + n.trim(); }) : [v];
+      parts.forEach(function(p) { nameCts[p] = (nameCts[p] || 0) + 1; });
+    });
     Object.entries(nameCts).forEach(function(kv) { if (kv[1] > 1) dupNames.add(kv[0]); });
 
     // Build student's ranked elective choices for dropdown ordering
@@ -2438,7 +2509,7 @@ function ConflictsPage({ state, setState }) {
             React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase", marginBottom: 4 } }, p.label),
             p.startTime && React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", marginBottom: 4 } }, p.startTime),
             React.createElement("div", { style: { fontSize: 12, color: isDup ? "var(--accent3)" : isEmpty ? "var(--danger)" : isElec ? "var(--accent)" : "var(--text)", fontWeight: 500 } },
-              val ? val.replace("[E] ", "") : "Empty"
+              val ? val.replace("[E] ", "").replace(" | ", " / ") : "Empty"
             ),
             isDup && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "⚠ Duplicate"),
             !isDup && isElec && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "Elective"),
@@ -2455,6 +2526,23 @@ function ConflictsPage({ state, setState }) {
               onChange: function(ev) {
                 var newVal = ev.target.value;
                 var pid = editSlot;
+                if (newVal && newVal.startsWith("[E] ")) {
+                  var eName = newVal.replace("[E] ", "");
+                  var el = electives.find(function(e) { return e.name === eName; });
+                  if (el && !el.isYearLong && !el.isElaIntervention && !el.isMathIntervention) {
+                    var currentSched = editSchedule || {};
+                    var alreadyUsed = Object.entries(currentSched).filter(function(kv) { return kv[0] !== pid && kv[1]; }).map(function(kv) { return kv[1]; }).join(" | ").replace(/\[E\] /g, "").split(" | ").map(function(n) { return n.trim().toLowerCase(); });
+                    var partner = null;
+                    for (var ci = 1; ci <= 12; ci++) {
+                      var choiceName = (a.student["choice_" + ci] || "").trim();
+                      if (!choiceName || choiceName.toLowerCase() === eName.toLowerCase()) continue;
+                      if (alreadyUsed.includes(choiceName.toLowerCase())) continue;
+                      var pel = electives.find(function(e) { return e.name.toLowerCase() === choiceName.toLowerCase() && !e.isYearLong && !e.isElaIntervention && !e.isMathIntervention && (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade); });
+                      if (pel) { partner = pel; break; }
+                    }
+                    if (partner) newVal = "[E] " + eName + " | " + partner.name;
+                  }
+                }
                 setEditSchedule(function(prev) {
                   var updated = Object.assign({}, prev);
                   if (!newVal) { delete updated[pid]; } else { updated[pid] = newVal; }
@@ -2580,7 +2668,7 @@ function ConflictsPage({ state, setState }) {
                 var cls = sched[p.id];
                 return React.createElement("div", { key: p.id, className: "period-pill " + (cls ? "" : "period-pill-empty") },
                   React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase" } }, p.label),
-                  React.createElement("div", { style: { fontSize: 11, color: cls ? "var(--text)" : "var(--danger)", marginTop: 2 } }, cls ? cls.replace("[E] ", "") : "Empty"),
+                  React.createElement("div", { style: { fontSize: 11, color: cls ? "var(--text)" : "var(--danger)", marginTop: 2 } }, cls ? cls.replace("[E] ", "").replace(" | ", " / ") : "Empty"),
                   p.startTime && React.createElement("div", { style: { fontSize: 9, color: "var(--text3)" } }, p.startTime)
                 );
               })
