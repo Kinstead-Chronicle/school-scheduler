@@ -664,42 +664,85 @@ function runScheduler(state) {
 }
 
 
-function exportToExcel(result, state, runName) {
+async function exportToExcel(result, state, runName) {
   const { assignments } = result;
-  const { periods } = state;
+  const { periods, teachers = [], classes = [], electives = [] } = state;
   const wb = XLSX.utils.book_new();
+
+  // Helper: look up teacher name for a class/elective name
+  const getTeacherName = className => {
+    const cls = classes.find(c => c.name.toLowerCase() === className.toLowerCase());
+    if (cls && cls.teacherId) {
+      const t = teachers.find(t => t.id === cls.teacherId);
+      if (t) return t.name + (t.room ? " (" + t.room + ")" : "");
+    }
+    const elc = electives.find(e => e.name.toLowerCase() === className.toLowerCase());
+    if (elc && elc.teacherId) {
+      const t = teachers.find(t => t.id === elc.teacherId);
+      if (t) return t.name + (t.room ? " (" + t.room + ")" : "");
+    }
+    return "";
+  };
+
+  // Build allClasses: name → { pid → [studentNames] }
+  // For semester pairs "Band | Art", register both names under the same period
   const allClasses = {};
   assignments.forEach(a => {
     Object.entries(a.schedule).forEach(([pid, cls]) => {
-      const clean = cls.replace("[E] ", "");
-      if (!allClasses[clean]) allClasses[clean] = {};
-      if (!allClasses[clean][pid]) allClasses[clean][pid] = [];
-      allClasses[clean][pid].push(a.student.student_name);
+      const names = cls.replace("[E] ", "").includes(" | ")
+        ? cls.replace("[E] ", "").split(" | ").map(s => s.trim())
+        : [cls.replace("[E] ", "")];
+      names.forEach(name => {
+        if (!allClasses[name]) allClasses[name] = {};
+        if (!allClasses[name][pid]) allClasses[name][pid] = [];
+        allClasses[name][pid].push(a.student.student_name);
+      });
     });
   });
+
   const pCols = periods.map(p => p.label + (p.startTime ? " (" + p.startTime + (p.endTime ? "-" + p.endTime : "") + ")" : ""));
-  const masterRows = [["Class", ...pCols, "Total"]];
-  masterRows.push(["Scheduled Time", ...periods.map(p => p.startTime + (p.endTime ? " - " + p.endTime : "")), ""]);
+
+  // ── Tab 1: Master Schedule ─────────────────────────────────────────────────
+  const masterRows = [["Class", "Teacher", ...pCols, "Total"]];
+  masterRows.push(["", "", ...periods.map(p => p.startTime + (p.endTime ? " - " + p.endTime : "")), ""]);
   Object.entries(allClasses).forEach(([cls, pd]) => {
-    const row = [cls];
+    const row = [cls, getTeacherName(cls)];
     periods.forEach(p => { const s = pd[p.id] || []; row.push(s.length ? s.length + " students" : ""); });
     row.push(periods.reduce((sum, p) => sum + (pd[p.id] ? pd[p.id].length : 0), 0));
     masterRows.push(row);
   });
   const ws1 = XLSX.utils.aoa_to_sheet(masterRows);
-  ws1["!cols"] = [{ wch: 28 }, ...periods.map(() => ({ wch: 16 })), { wch: 8 }];
+  ws1["!cols"] = [{ wch: 28 }, { wch: 22 }, ...periods.map(() => ({ wch: 16 })), { wch: 8 }];
   XLSX.utils.book_append_sheet(wb, ws1, "Master Schedule");
-  const rosterRows = [["Class", ...pCols]];
+
+  // ── Tab 2: Class Rosters (vertical list per class) ─────────────────────────
+  const rosterRows = [["Class", "Teacher", ...pCols]];
   Object.entries(allClasses).forEach(([cls, pd]) => {
     const max = Math.max(...periods.map(p => (pd[p.id] || []).length), 0);
     if (!max) return;
-    rosterRows.push([cls, ...periods.map(p => (pd[p.id] || []).length ? (pd[p.id].length + " enrolled") : "")]);
-    for (let i = 0; i < max; i++) { const row = [""]; periods.forEach(p => { row.push((pd[p.id] || [])[i] || ""); }); rosterRows.push(row); }
-    rosterRows.push(new Array(periods.length + 1).fill(""));
+    rosterRows.push([cls, getTeacherName(cls), ...periods.map(p => (pd[p.id] || []).length ? (pd[p.id].length + " enrolled") : "")]);
+    for (let i = 0; i < max; i++) { const row = ["", ""]; periods.forEach(p => { row.push((pd[p.id] || [])[i] || ""); }); rosterRows.push(row); }
+    rosterRows.push(new Array(periods.length + 2).fill(""));
   });
   const ws2 = XLSX.utils.aoa_to_sheet(rosterRows);
-  ws2["!cols"] = [{ wch: 28 }, ...periods.map(() => ({ wch: 22 }))];
+  ws2["!cols"] = [{ wch: 28 }, { wch: 22 }, ...periods.map(() => ({ wch: 22 }))];
   XLSX.utils.book_append_sheet(wb, ws2, "Class Rosters");
+
+  // ── Tab 3: Roster Grid (class × period, like teacher CSV but students) ─────
+  // Rows = classes, Columns = periods, Cells = "N: Name, Name, Name"
+  const gridHeaders = ["Class", "Teacher", ...pCols];
+  const gridRows = [gridHeaders];
+  Object.entries(allClasses).forEach(([cls, pd]) => {
+    const row = [cls, getTeacherName(cls)];
+    periods.forEach(p => {
+      const names = pd[p.id] || [];
+      row.push(names.length ? names.length + ": " + names.join(", ") : "");
+    });
+    gridRows.push(row);
+  });
+  const wsGrid = XLSX.utils.aoa_to_sheet(gridRows);
+  wsGrid["!cols"] = [{ wch: 28 }, { wch: 22 }, ...periods.map(() => ({ wch: 40 }))];
+  XLSX.utils.book_append_sheet(wb, wsGrid, "Roster Grid");
   const pLabels = periods.map(p => p.label + (p.startTime ? " (" + p.startTime + ")" : ""));
   const headers = ["Student Name", "Student ID", "Grade", "Designation", ...pLabels, "Elective 1", "Elective 2", "PEAKS OK"];
   const peaksNameSet = new Set((state.peaksPairs || []).flatMap(pp => {
@@ -823,7 +866,29 @@ function exportToExcel(result, state, runName) {
   });
   XLSX.utils.book_append_sheet(wb, wsCfg, "Configuration");
 
-  XLSX.writeFile(wb, runName + ".xlsx");
+  // ── Save: use File System Access API (lets user pick destination) ──────────
+  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: runName + ".xlsx",
+        types: [{ description: "Excel Workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (e) {
+      if (e.name === "AbortError") return; // user cancelled — do nothing
+      // Any other error: fall through to download
+    }
+  }
+  // Fallback for browsers without File System Access API (Firefox, Safari)
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = runName + ".xlsx"; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function TeachersPage({ state, setState }) {
