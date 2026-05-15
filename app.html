@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.6.0";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -143,16 +143,30 @@ function runScheduler(state) {
   });
 
   // ── Teacher availability constraints ──────────────────────────────────────
-  // If a class or elective has a teacher assigned, intersect its available
-  // periods with that teacher's "available" periods. "plan", "away", and
-  // "unavailable" slots are all treated as blocked for student scheduling.
-  const teacherAvailMap = {};
+  // Teacher period statuses:
+  //   standard  → available for standard class scheduling only
+  //   elective  → available for elective scheduling only
+  //   free      → available for both (open/unassigned period)
+  //   plan      → planning period — blocked for all scheduling
+  //   unavailable → blocked for all scheduling
+  //   available → legacy value (v1.4 and earlier) — treated as "free"
+  const teacherStdMap = {};  // periods a teacher can be scheduled for standard classes
+  const teacherElecMap = {}; // periods a teacher can be scheduled for electives
   (state.teachers || []).forEach(t => {
-    teacherAvailMap[t.id] = pids.filter(pid => (t.periods || {})[pid] === "available");
+    teacherStdMap[t.id] = pids.filter(pid => {
+      const s = (t.periods || {})[pid] || "standard";
+      // "standard" and legacy "available"/"free" are schedulable for standard classes
+      return s === "standard" || s === "available" || s === "free";
+    });
+    teacherElecMap[t.id] = pids.filter(pid => {
+      const s = (t.periods || {})[pid] || "standard";
+      // "elective" and legacy "available"/"free" are schedulable for electives
+      return s === "elective" || s === "available" || s === "free";
+    });
   });
   classes.forEach(c => {
-    if (c.teacherId && teacherAvailMap[c.teacherId]) {
-      const tPids = teacherAvailMap[c.teacherId];
+    if (c.teacherId && teacherStdMap[c.teacherId]) {
+      const tPids = teacherStdMap[c.teacherId];
       const intersection = classPMap[c.id].filter(pid => tPids.includes(pid));
       if (intersection.length > 0) {
         classPMap[c.id] = intersection;
@@ -161,8 +175,8 @@ function runScheduler(state) {
     }
   });
   electives.forEach(e => {
-    if (e.teacherId && teacherAvailMap[e.teacherId]) {
-      const tPids = teacherAvailMap[e.teacherId];
+    if (e.teacherId && teacherElecMap[e.teacherId]) {
+      const tPids = teacherElecMap[e.teacherId];
       const intersection = electivePMap[e.id].filter(pid => tPids.includes(pid));
       if (intersection.length > 0) electivePMap[e.id] = intersection;
     }
@@ -358,8 +372,25 @@ function runScheduler(state) {
     if (desigs.includes("ELA Intervention")) assignIntervention(true);
     if (desigs.includes("Math Intervention")) assignIntervention(false);
 
-    // Step 3: Single-period-locked standard classes
+    // Step 2.5: Designation-pinned standard classes
+    // If a class has a designationTag and this student carries that tag,
+    // pin them to that class now — before the normal solver runs.
+    // Marking the category in usedCats prevents a second class of the same
+    // type (e.g. student gets Algebra 1 but NOT also regular 7th Math).
     const usedCats = new Set();
+    gradeClasses.filter(c => c.designationTag && desigs.includes(c.designationTag.trim()) && !pairedIds.has(c.id))
+      .forEach(cls => {
+        if (stdCount >= MAX_STANDARD) return;
+        if (cls.category && usedCats.has(cls.category.toLowerCase())) return;
+        const open = (classPMap[cls.id] || pids).find(p => !used.has(p) && canAssign(cls, p));
+        if (open) {
+          schedule[open] = cls.name;
+          used.add(open); addE(cls.id, open); markSlot(cls.id, open); stdCount++;
+          if (cls.category) usedCats.add(cls.category.toLowerCase());
+        }
+      });
+
+    // Step 3: Single-period-locked standard classes
     gradeClasses.filter(c => !pairedIds.has(c.id) && singlePeriod.has(c.id))
       .sort((a, b) => (classPMap[a.id]||[]).length - (classPMap[b.id]||[]).length)
       .forEach(cls => {
@@ -427,6 +458,12 @@ function runScheduler(state) {
       }
       return openSlots[0];
     };
+
+    // Pass 0: Designation-pinned electives
+    // If an elective has a designationTag and this student carries that tag,
+    // assign it before looking at the student's ranked choices.
+    electives.filter(e => e.designationTag && desigs.includes(e.designationTag.trim()) && !e.isElaIntervention && !e.isMathIntervention)
+      .forEach(el => tryElective(el, false));
 
     // Pass 1: prioritize choices that are below minimum (concentrate students there)
     for (const choice of choices) {
@@ -721,43 +758,107 @@ function TeachersPage({ state, setState }) {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
+  const [importError, setImportError] = useState("");
+  const importRef = useRef();
 
+  // ── Status definitions ────────────────────────────────────────────────────
+  // Standard    (green)  → teacher teaches a standard class — schedulable for standard classes
+  // Elective    (blue)   → teacher teaches an elective     — schedulable for electives
+  // Elementary  (white)  → teacher at elementary campus    — blocked (unavailable for MS scheduling)
+  // Plan        (yellow) → planning period                 — blocked
+  // Unavailable (black)  → off campus / N/A               — blocked
   const STATUS = [
-    { key: "available", label: "Available", bg: "rgba(126,240,162,0.15)", border: "rgba(126,240,162,0.35)", color: "var(--accent)" },
-    { key: "plan",      label: "Plan",      bg: "rgba(255,181,71,0.15)",  border: "rgba(255,181,71,0.35)",  color: "var(--accent3)" },
-    { key: "away",      label: "Away",      bg: "var(--surface3)",         border: "var(--border)",           color: "var(--text3)" },
-    { key: "unavailable", label: "N/A",     bg: "rgba(0,0,0,0.35)",       border: "rgba(0,0,0,0.5)",         color: "#666" },
+    { key: "standard",    label: "Standard",    bg: "rgba(126,240,162,0.15)", border: "rgba(126,240,162,0.35)", color: "var(--accent)" },
+    { key: "elective",    label: "Elective",    bg: "rgba(79,200,255,0.15)",  border: "rgba(79,200,255,0.35)",  color: "var(--accent2)" },
+    { key: "elementary",  label: "Elementary",  bg: "rgba(240,240,240,0.08)", border: "rgba(220,220,220,0.25)", color: "#ccc" },
+    { key: "plan",        label: "Plan",        bg: "rgba(255,181,71,0.15)",  border: "rgba(255,181,71,0.35)",  color: "var(--accent3)" },
+    { key: "unavailable", label: "Unavailable", bg: "rgba(0,0,0,0.55)",       border: "#222",                   color: "#555" },
   ];
-  const getStatus = key => STATUS.find(s => s.key === key) || STATUS[0];
-
-  const cycle = pid => setForm(f => {
-    const cur = (f.periods || {})[pid] || "available";
-    const idx = STATUS.findIndex(s => s.key === cur);
-    const next = STATUS[(idx + 1) % STATUS.length].key;
-    return { ...f, periods: { ...(f.periods || {}), [pid]: next } };
-  });
+  // Backward compat: old "available"/"free" → "standard", old "away" → "unavailable"
+  const getStatus = key => {
+    if (key === "available" || key === "free") return STATUS.find(s => s.key === "standard");
+    if (key === "away") return STATUS.find(s => s.key === "unavailable");
+    return STATUS.find(s => s.key === key) || STATUS.find(s => s.key === "standard");
+  };
 
   const openAdd = () => {
     const ps = {};
-    periods.forEach(p => { ps[p.id] = "available"; });
+    periods.forEach(p => { ps[p.id] = "standard"; });
     setEditing(null); setForm({ name: "", room: "", periods: ps }); setShowModal(true);
   };
   const openEdit = t => {
     const ps = {};
-    periods.forEach(p => { ps[p.id] = (t.periods || {})[p.id] || "available"; });
+    periods.forEach(p => { ps[p.id] = (t.periods || {})[p.id] || "standard"; });
     setEditing(t.id); setForm({ ...t, periods: ps }); setShowModal(true);
   };
   const save = () => {
     const item = { ...form, id: editing || "teacher_" + Date.now() };
-    setState(s => ({ ...s, teachers: editing ? s.teachers.map(t => t.id === editing ? item : t) : [...s.teachers, item] }));
+    setState(s => ({
+      ...s,
+      teachers: editing
+        ? (s.teachers || []).map(t => t.id === editing ? item : t)
+        : [...(s.teachers || []), item]
+    }));
     setShowModal(false);
   };
-  const remove = id => setState(s => ({ ...s, teachers: s.teachers.filter(t => t.id !== id) }));
+  const remove = id => setState(s => ({ ...s, teachers: (s.teachers || []).filter(t => t.id !== id) }));
 
   const getAssigned = tid => {
     const cls = classes.filter(c => c.teacherId === tid).map(c => c.name);
     const els = electives.filter(e => e.teacherId === tid).map(e => e.name);
     return [...cls, ...els];
+  };
+
+  // ── CSV import ────────────────────────────────────────────────────────────
+  // Expected format: Name, Room, P1, P2, P3 ... (headers match period labels or positions)
+  // Cell values: blank/"N/A"/"Away" → unavailable | "Plan" → plan | other text → standard
+  const importCSV = file => {
+    setImportError("");
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: res => {
+      const rows = res.data;
+      const headers = res.meta.fields || [];
+      if (!headers.length) { setImportError("CSV appears empty or unreadable."); return; }
+
+      // Identify name/room columns (case-insensitive)
+      const nameCol = headers.find(h => /^(name|teacher)$/i.test(h.trim())) || headers[0];
+      const roomCol = headers.find(h => /^room$/i.test(h.trim()));
+      // Remaining columns assumed to be periods (in order)
+      const periodCols = headers.filter(h => h !== nameCol && h !== roomCol);
+
+      const imported = rows.map(row => {
+        const name = (row[nameCol] || "").trim();
+        if (!name) return null;
+        const room = roomCol ? (row[roomCol] || "").trim() : "";
+        const ps = {};
+        periods.forEach((p, i) => {
+          const col = periodCols[i];
+          const raw = col ? (row[col] || "").trim() : "";
+          const lower = raw.toLowerCase();
+          if (!raw || lower === "n/a" || lower === "na" || lower === "away" || lower === "unavailable") {
+            ps[p.id] = "unavailable";
+          } else if (lower === "plan") {
+            ps[p.id] = "plan";
+          } else {
+            // Non-empty, non-blocked value: treat as standard class period
+            ps[p.id] = "standard";
+          }
+        });
+        const existing = (teachers || []).find(t => t.name.toLowerCase() === name.toLowerCase());
+        return { id: existing ? existing.id : "teacher_" + Date.now() + "_" + Math.random().toString(36).slice(2), name, room, periods: ps };
+      }).filter(Boolean);
+
+      if (!imported.length) { setImportError("No valid rows found. Check that the first column is teacher names."); return; }
+
+      setState(s => {
+        const existing = s.teachers || [];
+        const merged = [...existing];
+        imported.forEach(imp => {
+          const idx = merged.findIndex(t => t.name.toLowerCase() === imp.name.toLowerCase());
+          if (idx >= 0) merged[idx] = imp; else merged.push(imp);
+        });
+        return { ...s, teachers: merged };
+      });
+    }, error: err => setImportError(err.message) });
   };
 
   return React.createElement("div", null,
@@ -767,22 +868,52 @@ function TeachersPage({ state, setState }) {
           React.createElement("div", { className: "page-title" }, "Teachers"),
           React.createElement("div", { className: "page-sub" }, "Set period availability per teacher — classes and electives inherit these constraints when a teacher is assigned")
         ),
-        React.createElement("button", { className: "btn btn-primary", onClick: openAdd, disabled: periods.length === 0 }, "+ Add Teacher")
+        React.createElement("div", { style: { display: "flex", gap: 8 } },
+          React.createElement("button", { className: "btn btn-ghost", onClick: () => importRef.current && importRef.current.click(), disabled: periods.length === 0 }, "↑ Import CSV"),
+          React.createElement("button", { className: "btn btn-primary", onClick: openAdd, disabled: periods.length === 0 }, "+ Add Teacher")
+        )
       )
     ),
+    React.createElement("input", { ref: importRef, type: "file", accept: ".csv", style: { display: "none" }, onChange: e => e.target.files[0] && importCSV(e.target.files[0]) }),
 
     periods.length === 0 && React.createElement("div", { className: "alert alert-warn" }, "Configure periods in School Setup before adding teachers."),
+    importError && React.createElement("div", { className: "alert alert-error", style: { marginBottom: 12 } }, importError),
 
     React.createElement("div", { className: "alert alert-info", style: { marginBottom: 16 } },
-      "Teachers are optional. When assigned to a class or elective, only their ",
-      React.createElement("strong", null, "Available"),
-      " periods will be used for scheduling. Plan, Away, and N/A periods are blocked for students."
+      "Teachers are optional. Assign a teacher to a class or elective to constrain which periods it can run. ",
+      React.createElement("strong", null, "Standard"),
+      " and ",
+      React.createElement("strong", null, "Free"),
+      " periods are used for standard classes; ",
+      React.createElement("strong", null, "Elective"),
+      " and ",
+      React.createElement("strong", null, "Free"),
+      " for electives. Plan and Unavailable are blocked."
+    ),
+
+    // Legend
+    React.createElement("div", { style: { display: "flex", gap: 14, marginBottom: 16, flexWrap: "wrap" } },
+      STATUS.map(s => React.createElement("div", { key: s.key, style: { display: "flex", alignItems: "center", gap: 6 } },
+        React.createElement("div", { style: { width: 14, height: 14, borderRadius: 3, background: s.bg, border: "1px solid " + s.border } }),
+        React.createElement("span", { style: { fontSize: 11, color: "var(--text2)" } }, s.label)
+      ))
     ),
 
     teachers.length === 0
-      ? React.createElement("div", { className: "empty" },
-          React.createElement("div", { className: "empty-title" }, "No teachers configured"),
-          React.createElement("div", { className: "empty-sub" }, "Add teachers to enforce period availability constraints")
+      ? React.createElement("div", null,
+          React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "empty-title" }, "No teachers configured"),
+            React.createElement("div", { className: "empty-sub" }, "Add teachers manually or import from a CSV")
+          ),
+          React.createElement("div", { className: "card", style: { marginTop: 12 } },
+            React.createElement("div", { className: "card-title" }, "CSV Import Format"),
+            React.createElement("div", { style: { background: "var(--surface2)", padding: 12, borderRadius: 6, fontSize: 11, color: "var(--accent)", fontFamily: "var(--mono)" } },
+              "Name,Room,P1,P2,P3,P4,P5,P6", React.createElement("br", null),
+              "McGrath,138,8th Grade Math,Plan,Plan,7th Grade Math,Plan,N/A", React.createElement("br", null),
+              "Emmert,104,Band 2/3,Band 1,Plan,Plan,Plan,N/A", React.createElement("br", null),
+              React.createElement("span", { style: { color: "var(--text3)" } }, "— blank/N/A/Away → Unavailable · Plan → Plan · any class name → Standard")
+            )
+          )
         )
       : React.createElement("div", { className: "card" },
           React.createElement("div", { style: { overflowX: "auto" } },
@@ -791,7 +922,7 @@ function TeachersPage({ state, setState }) {
                 React.createElement("tr", null,
                   React.createElement("th", null, "Teacher"),
                   React.createElement("th", null, "Room"),
-                  periods.map(p => React.createElement("th", { key: p.id, style: { textAlign: "center", minWidth: 72 } },
+                  periods.map(p => React.createElement("th", { key: p.id, style: { textAlign: "center", minWidth: 80 } },
                     p.label,
                     p.startTime && React.createElement("div", { style: { fontWeight: "normal", fontSize: 9, color: "var(--text3)" } }, p.startTime)
                   )),
@@ -806,7 +937,7 @@ function TeachersPage({ state, setState }) {
                     React.createElement("td", { style: { color: "var(--text)", fontWeight: 500 } }, t.name),
                     React.createElement("td", null, t.room ? React.createElement("span", { className: "tag tag-gray" }, t.room) : React.createElement("span", { style: { color: "var(--text3)" } }, "—")),
                     periods.map(p => {
-                      const s = getStatus((t.periods || {})[p.id] || "available");
+                      const s = getStatus((t.periods || {})[p.id] || "standard");
                       return React.createElement("td", { key: p.id, style: { textAlign: "center", padding: "8px 6px" } },
                         React.createElement("span", { style: { display: "inline-block", padding: "3px 8px", borderRadius: 4, fontSize: 10, background: s.bg, border: "1px solid " + s.border, color: s.color, whiteSpace: "nowrap" } }, s.label)
                       );
@@ -829,12 +960,6 @@ function TeachersPage({ state, setState }) {
                 })
               )
             )
-          ),
-          React.createElement("div", { style: { display: "flex", gap: 14, marginTop: 14, flexWrap: "wrap" } },
-            STATUS.map(s => React.createElement("div", { key: s.key, style: { display: "flex", alignItems: "center", gap: 6 } },
-              React.createElement("div", { style: { width: 14, height: 14, borderRadius: 3, background: s.bg, border: "1px solid " + s.border } }),
-              React.createElement("span", { style: { fontSize: 11, color: "var(--text2)" } }, s.label)
-            ))
           )
         ),
 
@@ -847,20 +972,22 @@ function TeachersPage({ state, setState }) {
             React.createElement("div", null, React.createElement("label", null, "Room"), React.createElement("input", { value: form.room || "", onChange: e => setForm(f => ({ ...f, room: e.target.value })), placeholder: "e.g. 138" }))
           ),
           React.createElement("div", null,
-            React.createElement("label", { style: { marginBottom: 8, display: "block" } }, "Period Availability ",
-              React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(click to cycle through states)")
-            ),
-            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 8 } },
+            React.createElement("label", { style: { marginBottom: 8, display: "block" } }, "Period Availability"),
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 } },
               periods.map(p => {
-                const s = getStatus((form.periods || {})[p.id] || "available");
-                return React.createElement("div", {
-                  key: p.id,
-                  style: { background: s.bg, border: "1px solid " + s.border, borderRadius: 6, padding: "10px 12px", cursor: "pointer", userSelect: "none", transition: "all 0.1s" },
-                  onClick: () => cycle(p.id)
-                },
-                  React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase", marginBottom: 2 } }, p.label),
-                  p.startTime && React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", marginBottom: 4 } }, p.startTime),
-                  React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: s.color } }, s.label)
+                const val = (form.periods || {})[p.id] || "standard";
+                const s = getStatus(val);
+                return React.createElement("div", { key: p.id },
+                  React.createElement("label", { style: { fontSize: 10, color: "var(--text3)", marginBottom: 3 } },
+                    p.label + (p.startTime ? "  ·  " + p.startTime : "")
+                  ),
+                  React.createElement("select", {
+                    value: val,
+                    onChange: e => setForm(f => ({ ...f, periods: { ...(f.periods || {}), [p.id]: e.target.value } })),
+                    style: { background: s.bg, borderColor: s.border, color: s.color, fontWeight: 600, fontSize: 12, padding: "6px 8px" }
+                  },
+                    STATUS.map(st => React.createElement("option", { key: st.key, value: st.key, style: { background: "var(--surface2)", color: "var(--text)" } }, st.label))
+                  )
                 );
               })
             )
@@ -1181,6 +1308,10 @@ function ClassesPage({ state, setState }) {
                   return React.createElement("button", { key: p.id, className: "btn btn-sm " + (selected ? "btn-primary" : "btn-ghost"), onClick: () => toggleP(p.id) }, p.label);
                 })
               )
+            ),
+            React.createElement("div", null,
+              React.createElement("label", null, "Designation Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional — pins students with this designation to this class)")),
+              React.createElement("input", { value: form.designationTag || "", onChange: e => setForm(f => ({ ...f, designationTag: e.target.value })), placeholder: "e.g. Algebra 1, Bio Honors" })
             )
           ),
           React.createElement("div", { className: "modal-actions" },
@@ -1648,6 +1779,10 @@ function ElectivesPage({ state, setState }) {
                 return React.createElement("button", { key: p.id, className: "btn btn-sm " + (selected ? "btn-primary" : "btn-ghost"), onClick: () => toggleP(p.id) }, p.label);
               })
             )
+          ),
+          React.createElement("div", null,
+            React.createElement("label", null, "Designation Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional — pins students with this designation to this elective)")),
+            React.createElement("input", { value: form.designationTag || "", onChange: e => setForm(f => ({ ...f, designationTag: e.target.value })), placeholder: "e.g. Band 2/3, Art Track" })
           )
         ),
         React.createElement("div", { className: "modal-actions" },
