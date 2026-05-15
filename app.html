@@ -168,9 +168,22 @@ function runScheduler(state) {
       return s === "elective" || s === "available" || s === "free";
     });
   });
+  // Helper: extract classId from a teacher period value
+  const tPeriodClassId = val => {
+    if (!val || typeof val === "string") return "";
+    return val.classId || "";
+  };
+
   classes.forEach(c => {
     if (c.teacherId && teacherStdMap[c.teacherId]) {
-      const tPids = teacherStdMap[c.teacherId];
+      const teacher = (state.teachers || []).find(t => t.id === c.teacherId);
+      // Check if the teacher has this class explicitly assigned to specific periods
+      const pinnedPids = teacher ? pids.filter(pid => {
+        const cid = tPeriodClassId((teacher.periods || {})[pid]);
+        return cid === c.id || cid === "peaks:" + c.id;
+      }) : [];
+      // Use pinned periods if any exist; otherwise fall back to all teacher standard periods
+      const tPids = pinnedPids.length > 0 ? pinnedPids : teacherStdMap[c.teacherId];
       const intersection = classPMap[c.id].filter(pid => tPids.includes(pid));
       if (intersection.length > 0) {
         classPMap[c.id] = intersection;
@@ -180,7 +193,12 @@ function runScheduler(state) {
   });
   electives.forEach(e => {
     if (e.teacherId && teacherElecMap[e.teacherId]) {
-      const tPids = teacherElecMap[e.teacherId];
+      const teacher = (state.teachers || []).find(t => t.id === e.teacherId);
+      const pinnedPids = teacher ? pids.filter(pid => {
+        const cid = tPeriodClassId((teacher.periods || {})[pid]);
+        return cid === e.id;
+      }) : [];
+      const tPids = pinnedPids.length > 0 ? pinnedPids : teacherElecMap[e.teacherId];
       const intersection = electivePMap[e.id].filter(pid => tPids.includes(pid));
       if (intersection.length > 0) electivePMap[e.id] = intersection;
     }
