@@ -758,7 +758,8 @@ function exportToExcel(result, state, runName) {
 }
 
 function TeachersPage({ state, setState }) {
-  const { teachers = [], periods = [], classes = [], electives = [] } = state;
+  const { teachers = [], periods = [], classes = [], electives = [], peaksPairs = [] } = state;
+  const peaksClassIds = new Set(peaksPairs.flatMap(p => [p.classAId, p.classBId]));
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
@@ -976,6 +977,10 @@ function TeachersPage({ state, setState }) {
   ];
   const getClassName = (classId, status) => {
     if (!classId) return null;
+    if (classId.startsWith("peaks:")) {
+      const c = classes.find(x => x.id === classId.slice(6));
+      return c ? c.name + " (PEAKS)" : null;
+    }
     const found = status === "elective"
       ? electives.find(e => e.id === classId)
       : classes.find(c => c.id === classId);
@@ -1104,7 +1109,11 @@ function TeachersPage({ state, setState }) {
                 const { status, classId } = getPVal((form.periods || {})[p.id]);
                 const s = getStatus(status);
                 const showPicker = status === "standard" || status === "elective";
-                const pickerOptions = status === "standard" ? classes : electives.filter(e => !e.isElaIntervention && !e.isMathIntervention);
+                const pickerOptions = status === "standard"
+                  ? classes.flatMap(c => peaksClassIds.has(c.id)
+                      ? [c, { id: "peaks:" + c.id, name: c.name + " (PEAKS)" }]
+                      : [c])
+                  : electives.filter(e => !e.isElaIntervention && !e.isMathIntervention);
                 return React.createElement("div", { key: p.id, style: { display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 8, alignItems: "center" } },
                   // Period label
                   React.createElement("div", null,
@@ -1126,7 +1135,7 @@ function TeachersPage({ state, setState }) {
                         onChange: e => setPeriodClass(p.id, e.target.value),
                         style: { fontSize: 12 }
                       },
-                        React.createElement("option", { value: "" }, "— " + (status === "standard" ? "Select class (incl. PEAKS)" : "Select elective") + " —"),
+                        React.createElement("option", { value: "" }, "— " + (status === "standard" ? "Select class" : "Select elective") + " —"),
                         pickerOptions.map(item => React.createElement("option", { key: item.id, value: item.id }, item.name))
                       )
                     : React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", padding: "6px 8px" } }, "—")
