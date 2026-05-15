@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -152,15 +152,19 @@ function runScheduler(state) {
   //   available → legacy value (v1.4 and earlier) — treated as "free"
   const teacherStdMap = {};  // periods a teacher can be scheduled for standard classes
   const teacherElecMap = {}; // periods a teacher can be scheduled for electives
+  // Helper: extract status string from either legacy string value or new {status,classId} object
+  const tPeriodStatus = val => {
+    if (!val) return "standard";
+    if (typeof val === "string") return val;
+    return val.status || "standard";
+  };
   (state.teachers || []).forEach(t => {
     teacherStdMap[t.id] = pids.filter(pid => {
-      const s = (t.periods || {})[pid] || "standard";
-      // "standard" and legacy "available"/"free" are schedulable for standard classes
+      const s = tPeriodStatus((t.periods || {})[pid]);
       return s === "standard" || s === "available" || s === "free";
     });
     teacherElecMap[t.id] = pids.filter(pid => {
-      const s = (t.periods || {})[pid] || "standard";
-      // "elective" and legacy "available"/"free" are schedulable for electives
+      const s = tPeriodStatus((t.periods || {})[pid]);
       return s === "elective" || s === "available" || s === "free";
     });
   });
@@ -761,12 +765,7 @@ function TeachersPage({ state, setState }) {
   const [importError, setImportError] = useState("");
   const importRef = useRef();
 
-  // ── Status definitions ────────────────────────────────────────────────────
-  // Standard    (green)  → teacher teaches a standard class — schedulable for standard classes
-  // Elective    (blue)   → teacher teaches an elective     — schedulable for electives
-  // Elementary  (white)  → teacher at elementary campus    — blocked (unavailable for MS scheduling)
-  // Plan        (yellow) → planning period                 — blocked
-  // Unavailable (black)  → off campus / N/A               — blocked
+  // ── Status definitions ─────────────────────────────────────────────────────
   const STATUS = [
     { key: "standard",    label: "Standard",    bg: "rgba(126,240,162,0.15)", border: "rgba(126,240,162,0.35)", color: "var(--accent)" },
     { key: "elective",    label: "Elective",    bg: "rgba(79,200,255,0.15)",  border: "rgba(79,200,255,0.35)",  color: "var(--accent2)" },
@@ -774,57 +773,91 @@ function TeachersPage({ state, setState }) {
     { key: "plan",        label: "Plan",        bg: "rgba(255,181,71,0.15)",  border: "rgba(255,181,71,0.35)",  color: "var(--accent3)" },
     { key: "unavailable", label: "Unavailable", bg: "rgba(0,0,0,0.55)",       border: "#222",                   color: "#555" },
   ];
-  // Backward compat: old "available"/"free" → "standard", old "away" → "unavailable"
   const getStatus = key => {
     if (key === "available" || key === "free") return STATUS.find(s => s.key === "standard");
     if (key === "away") return STATUS.find(s => s.key === "unavailable");
     return STATUS.find(s => s.key === key) || STATUS.find(s => s.key === "standard");
   };
+  // Extract status string from either legacy string value or new {status,classId} object
+  const getPVal = raw => {
+    if (!raw) return { status: "standard", classId: "" };
+    if (typeof raw === "string") return { status: raw, classId: "" };
+    return { status: raw.status || "standard", classId: raw.classId || "" };
+  };
 
+  // ── Open modal ─────────────────────────────────────────────────────────────
   const openAdd = () => {
     const ps = {};
-    periods.forEach(p => { ps[p.id] = "standard"; });
+    periods.forEach(p => { ps[p.id] = { status: "standard", classId: "" }; });
     setEditing(null); setForm({ name: "", room: "", periods: ps }); setShowModal(true);
   };
   const openEdit = t => {
     const ps = {};
-    periods.forEach(p => { ps[p.id] = (t.periods || {})[p.id] || "standard"; });
+    periods.forEach(p => { ps[p.id] = getPVal((t.periods || {})[p.id]); });
     setEditing(t.id); setForm({ ...t, periods: ps }); setShowModal(true);
   };
+
+  // ── Update a period's status or classId ───────────────────────────────────
+  const setPeriodStatus = (pid, status) =>
+    setForm(f => ({ ...f, periods: { ...(f.periods || {}), [pid]: { status, classId: "" } } }));
+  const setPeriodClass = (pid, classId) =>
+    setForm(f => ({ ...f, periods: { ...(f.periods || {}), [pid]: { ...getPVal((f.periods || {})[pid]), classId } } }));
+
+  // ── Save: persist teacher + sync teacherId on classes/electives ───────────
   const save = () => {
     const item = { ...form, id: editing || "teacher_" + Date.now() };
-    setState(s => ({
-      ...s,
-      teachers: editing
+    setState(s => {
+      const newTeachers = editing
         ? (s.teachers || []).map(t => t.id === editing ? item : t)
-        : [...(s.teachers || []), item]
-    }));
+        : [...(s.teachers || []), item];
+      // Clear old assignments for this teacher, then apply new ones from period objects
+      const newClasses = (s.classes || []).map(c => c.teacherId === item.id ? { ...c, teacherId: "" } : c);
+      const newElectives = (s.electives || []).map(e => e.teacherId === item.id ? { ...e, teacherId: "" } : e);
+      Object.values(item.periods || {}).forEach(pv => {
+        const { status, classId } = getPVal(pv);
+        if (!classId) return;
+        if (status === "standard") {
+          const idx = newClasses.findIndex(c => c.id === classId);
+          if (idx >= 0) newClasses[idx] = { ...newClasses[idx], teacherId: item.id };
+        } else if (status === "elective") {
+          const idx = newElectives.findIndex(e => e.id === classId);
+          if (idx >= 0) newElectives[idx] = { ...newElectives[idx], teacherId: item.id };
+        }
+      });
+      return { ...s, teachers: newTeachers, classes: newClasses, electives: newElectives };
+    });
     setShowModal(false);
   };
-  const remove = id => setState(s => ({ ...s, teachers: (s.teachers || []).filter(t => t.id !== id) }));
 
-  const getAssigned = tid => {
-    const cls = classes.filter(c => c.teacherId === tid).map(c => c.name);
-    const els = electives.filter(e => e.teacherId === tid).map(e => e.name);
-    return [...cls, ...els];
-  };
+  const remove = id => setState(s => ({
+    ...s,
+    teachers: (s.teachers || []).filter(t => t.id !== id),
+    classes: (s.classes || []).map(c => c.teacherId === id ? { ...c, teacherId: "" } : c),
+    electives: (s.electives || []).map(e => e.teacherId === id ? { ...e, teacherId: "" } : e),
+  }));
 
-  // ── CSV import ────────────────────────────────────────────────────────────
-  // Expected format: Name, Room, P1, P2, P3 ... (headers match period labels or positions)
-  // Cell values: blank/"N/A"/"Away" → unavailable | "Plan" → plan | other text → standard
+  // Clear all period assignments for a teacher (reset to standard, no class)
+  const clearTeacher = id => setState(s => {
+    const ps = {};
+    (s.periods || []).forEach(p => { ps[p.id] = { status: "standard", classId: "" }; });
+    return {
+      ...s,
+      teachers: (s.teachers || []).map(t => t.id === id ? { ...t, periods: ps } : t),
+      classes: (s.classes || []).map(c => c.teacherId === id ? { ...c, teacherId: "" } : c),
+      electives: (s.electives || []).map(e => e.teacherId === id ? { ...e, teacherId: "" } : e),
+    };
+  });
+
+  // ── CSV import ─────────────────────────────────────────────────────────────
   const importCSV = file => {
     setImportError("");
     Papa.parse(file, { header: true, skipEmptyLines: true, complete: res => {
       const rows = res.data;
       const headers = res.meta.fields || [];
       if (!headers.length) { setImportError("CSV appears empty or unreadable."); return; }
-
-      // Identify name/room columns (case-insensitive)
       const nameCol = headers.find(h => /^(name|teacher)$/i.test(h.trim())) || headers[0];
       const roomCol = headers.find(h => /^room$/i.test(h.trim()));
-      // Remaining columns assumed to be periods (in order)
       const periodCols = headers.filter(h => h !== nameCol && h !== roomCol);
-
       const imported = rows.map(row => {
         const name = (row[nameCol] || "").trim();
         if (!name) return null;
@@ -834,21 +867,16 @@ function TeachersPage({ state, setState }) {
           const col = periodCols[i];
           const raw = col ? (row[col] || "").trim() : "";
           const lower = raw.toLowerCase();
-          if (!raw || lower === "n/a" || lower === "na" || lower === "away" || lower === "unavailable") {
-            ps[p.id] = "unavailable";
-          } else if (lower === "plan") {
-            ps[p.id] = "plan";
-          } else {
-            // Non-empty, non-blocked value: treat as standard class period
-            ps[p.id] = "standard";
-          }
+          let status = "standard";
+          if (!raw || lower === "n/a" || lower === "na" || lower === "away" || lower === "unavailable") status = "unavailable";
+          else if (lower === "plan") status = "plan";
+          else if (lower === "elementary") status = "elementary";
+          ps[p.id] = { status, classId: "" };
         });
         const existing = (teachers || []).find(t => t.name.toLowerCase() === name.toLowerCase());
         return { id: existing ? existing.id : "teacher_" + Date.now() + "_" + Math.random().toString(36).slice(2), name, room, periods: ps };
       }).filter(Boolean);
-
-      if (!imported.length) { setImportError("No valid rows found. Check that the first column is teacher names."); return; }
-
+      if (!imported.length) { setImportError("No valid rows found."); return; }
       setState(s => {
         const existing = s.teachers || [];
         const merged = [...existing];
@@ -861,12 +889,25 @@ function TeachersPage({ state, setState }) {
     }, error: err => setImportError(err.message) });
   };
 
+  // ── Assigned classes lookup ────────────────────────────────────────────────
+  const getAssigned = tid => [
+    ...classes.filter(c => c.teacherId === tid).map(c => c.name),
+    ...electives.filter(e => e.teacherId === tid).map(e => e.name),
+  ];
+  const getClassName = (classId, status) => {
+    if (!classId) return null;
+    const found = status === "elective"
+      ? electives.find(e => e.id === classId)
+      : classes.find(c => c.id === classId);
+    return found ? found.name : null;
+  };
+
   return React.createElement("div", null,
     React.createElement("div", { className: "page-header" },
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
         React.createElement("div", null,
           React.createElement("div", { className: "page-title" }, "Teachers"),
-          React.createElement("div", { className: "page-sub" }, "Set period availability per teacher — classes and electives inherit these constraints when a teacher is assigned")
+          React.createElement("div", { className: "page-sub" }, "Assign each teacher's schedule by period — constrains which periods each class can run")
         ),
         React.createElement("div", { style: { display: "flex", gap: 8 } },
           React.createElement("button", { className: "btn btn-ghost", onClick: () => importRef.current && importRef.current.click(), disabled: periods.length === 0 }, "↑ Import CSV"),
@@ -879,16 +920,8 @@ function TeachersPage({ state, setState }) {
     periods.length === 0 && React.createElement("div", { className: "alert alert-warn" }, "Configure periods in School Setup before adding teachers."),
     importError && React.createElement("div", { className: "alert alert-error", style: { marginBottom: 12 } }, importError),
 
-    React.createElement("div", { className: "alert alert-info", style: { marginBottom: 16 } },
-      "Teachers are optional. Assign a teacher to a class or elective to constrain which periods it can run. ",
-      React.createElement("strong", null, "Standard"),
-      " and ",
-      React.createElement("strong", null, "Free"),
-      " periods are used for standard classes; ",
-      React.createElement("strong", null, "Elective"),
-      " and ",
-      React.createElement("strong", null, "Free"),
-      " for electives. Plan and Unavailable are blocked."
+    classes.length === 0 && React.createElement("div", { className: "alert alert-warn", style: { marginBottom: 12 } },
+      "Add standard classes and electives first so you can assign them to teacher periods."
     ),
 
     // Legend
@@ -903,7 +936,7 @@ function TeachersPage({ state, setState }) {
       ? React.createElement("div", null,
           React.createElement("div", { className: "empty" },
             React.createElement("div", { className: "empty-title" }, "No teachers configured"),
-            React.createElement("div", { className: "empty-sub" }, "Add teachers manually or import from a CSV")
+            React.createElement("div", { className: "empty-sub" }, "Add teachers manually or import from CSV")
           ),
           React.createElement("div", { className: "card", style: { marginTop: 12 } },
             React.createElement("div", { className: "card-title" }, "CSV Import Format"),
@@ -911,7 +944,7 @@ function TeachersPage({ state, setState }) {
               "Name,Room,P1,P2,P3,P4,P5,P6", React.createElement("br", null),
               "McGrath,138,8th Grade Math,Plan,Plan,7th Grade Math,Plan,N/A", React.createElement("br", null),
               "Emmert,104,Band 2/3,Band 1,Plan,Plan,Plan,N/A", React.createElement("br", null),
-              React.createElement("span", { style: { color: "var(--text3)" } }, "— blank/N/A/Away → Unavailable · Plan → Plan · any class name → Standard")
+              React.createElement("span", { style: { color: "var(--text3)" } }, "blank/N/A → Unavailable · Plan → Plan · Elementary → Elementary · other → Standard")
             )
           )
         )
@@ -922,7 +955,7 @@ function TeachersPage({ state, setState }) {
                 React.createElement("tr", null,
                   React.createElement("th", null, "Teacher"),
                   React.createElement("th", null, "Room"),
-                  periods.map(p => React.createElement("th", { key: p.id, style: { textAlign: "center", minWidth: 80 } },
+                  periods.map(p => React.createElement("th", { key: p.id, style: { textAlign: "center", minWidth: 90 } },
                     p.label,
                     p.startTime && React.createElement("div", { style: { fontWeight: "normal", fontSize: 9, color: "var(--text3)" } }, p.startTime)
                   )),
@@ -934,17 +967,22 @@ function TeachersPage({ state, setState }) {
                 teachers.map(t => {
                   const assigned = getAssigned(t.id);
                   return React.createElement("tr", { key: t.id },
-                    React.createElement("td", { style: { color: "var(--text)", fontWeight: 500 } }, t.name),
+                    React.createElement("td", { style: { color: "var(--text)", fontWeight: 500, whiteSpace: "nowrap" } }, t.name),
                     React.createElement("td", null, t.room ? React.createElement("span", { className: "tag tag-gray" }, t.room) : React.createElement("span", { style: { color: "var(--text3)" } }, "—")),
                     periods.map(p => {
-                      const s = getStatus((t.periods || {})[p.id] || "standard");
-                      return React.createElement("td", { key: p.id, style: { textAlign: "center", padding: "8px 6px" } },
-                        React.createElement("span", { style: { display: "inline-block", padding: "3px 8px", borderRadius: 4, fontSize: 10, background: s.bg, border: "1px solid " + s.border, color: s.color, whiteSpace: "nowrap" } }, s.label)
+                      const { status, classId } = getPVal((t.periods || {})[p.id]);
+                      const s = getStatus(status);
+                      const cn = getClassName(classId, status);
+                      return React.createElement("td", { key: p.id, style: { textAlign: "center", padding: "6px 4px" } },
+                        React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 } },
+                          React.createElement("span", { style: { display: "inline-block", padding: "2px 7px", borderRadius: 4, fontSize: 10, background: s.bg, border: "1px solid " + s.border, color: s.color, whiteSpace: "nowrap" } }, s.label),
+                          cn && React.createElement("span", { style: { fontSize: 9, color: "var(--text3)", maxWidth: 84, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, cn)
+                        )
                       );
                     }),
                     React.createElement("td", null,
                       assigned.length === 0
-                        ? React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "None")
+                        ? React.createElement("span", { style: { color: "var(--text3)", fontSize: 11 } }, "—")
                         : React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 3 } },
                             assigned.slice(0, 3).map(n => React.createElement("span", { key: n, className: "tag tag-gray", style: { fontSize: 9 } }, n)),
                             assigned.length > 3 && React.createElement("span", { style: { fontSize: 10, color: "var(--text3)" } }, "+" + (assigned.length - 3))
@@ -953,6 +991,7 @@ function TeachersPage({ state, setState }) {
                     React.createElement("td", null,
                       React.createElement("div", { className: "flex" },
                         React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => openEdit(t) }, "Edit"),
+                        React.createElement("button", { className: "btn btn-ghost btn-sm", onClick: () => clearTeacher(t.id), title: "Reset all period assignments for this teacher" }, "Clear"),
                         React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => remove(t.id) }, "Remove")
                       )
                     )
@@ -964,7 +1003,7 @@ function TeachersPage({ state, setState }) {
         ),
 
     showModal && React.createElement("div", { className: "modal-overlay", onClick: e => e.target === e.currentTarget && setShowModal(false) },
-      React.createElement("div", { className: "modal", style: { width: 560, maxWidth: "95vw" } },
+      React.createElement("div", { className: "modal", style: { width: 600, maxWidth: "96vw" } },
         React.createElement("div", { className: "modal-title" }, (editing ? "Edit" : "Add") + " Teacher"),
         React.createElement("div", { className: "flex-col" },
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 120px", gap: 12 } },
@@ -972,22 +1011,44 @@ function TeachersPage({ state, setState }) {
             React.createElement("div", null, React.createElement("label", null, "Room"), React.createElement("input", { value: form.room || "", onChange: e => setForm(f => ({ ...f, room: e.target.value })), placeholder: "e.g. 138" }))
           ),
           React.createElement("div", null,
-            React.createElement("label", { style: { marginBottom: 8, display: "block" } }, "Period Availability"),
-            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 } },
+            React.createElement("label", { style: { marginBottom: 8, display: "block" } }, "Period Schedule"),
+            // Column headers
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 8, marginBottom: 4 } },
+              React.createElement("span", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase" } }, "Period"),
+              React.createElement("span", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase" } }, "Type"),
+              React.createElement("span", { style: { fontSize: 9, color: "var(--text3)", textTransform: "uppercase" } }, "Class / Elective")
+            ),
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
               periods.map(p => {
-                const val = (form.periods || {})[p.id] || "standard";
-                const s = getStatus(val);
-                return React.createElement("div", { key: p.id },
-                  React.createElement("label", { style: { fontSize: 10, color: "var(--text3)", marginBottom: 3 } },
-                    p.label + (p.startTime ? "  ·  " + p.startTime : "")
+                const { status, classId } = getPVal((form.periods || {})[p.id]);
+                const s = getStatus(status);
+                const showPicker = status === "standard" || status === "elective";
+                const pickerOptions = status === "standard" ? classes : electives.filter(e => !e.isElaIntervention && !e.isMathIntervention);
+                return React.createElement("div", { key: p.id, style: { display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 8, alignItems: "center" } },
+                  // Period label
+                  React.createElement("div", null,
+                    React.createElement("div", { style: { fontSize: 11, color: "var(--text2)", fontWeight: 500 } }, p.label),
+                    p.startTime && React.createElement("div", { style: { fontSize: 9, color: "var(--text3)" } }, p.startTime)
                   ),
+                  // Status dropdown
                   React.createElement("select", {
-                    value: val,
-                    onChange: e => setForm(f => ({ ...f, periods: { ...(f.periods || {}), [p.id]: e.target.value } })),
+                    value: status,
+                    onChange: e => setPeriodStatus(p.id, e.target.value),
                     style: { background: s.bg, borderColor: s.border, color: s.color, fontWeight: 600, fontSize: 12, padding: "6px 8px" }
                   },
                     STATUS.map(st => React.createElement("option", { key: st.key, value: st.key, style: { background: "var(--surface2)", color: "var(--text)" } }, st.label))
-                  )
+                  ),
+                  // Class/elective picker — only shown when Standard or Elective
+                  showPicker
+                    ? React.createElement("select", {
+                        value: classId,
+                        onChange: e => setPeriodClass(p.id, e.target.value),
+                        style: { fontSize: 12 }
+                      },
+                        React.createElement("option", { value: "" }, "— " + (status === "standard" ? "Select class" : "Select elective") + " —"),
+                        pickerOptions.map(item => React.createElement("option", { key: item.id, value: item.id }, item.name))
+                      )
+                    : React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", padding: "6px 8px" } }, "—")
                 );
               })
             )
@@ -2506,8 +2567,8 @@ function App() {
       .then(d => { if (d.version && d.version !== APP_VERSION) setUpdateAvail(true); })
       .catch(() => {});
   }, []);
-  const STEPS = ["setup", "teachers", "classes", "students", "analyze", "electives", "schedule", "conflicts"];
-  const LABELS = { setup: "School Setup", teachers: "Teachers", classes: "Standard Classes", students: "Upload Students", analyze: "Analyze", electives: "Electives", schedule: "Run Schedule", conflicts: "Conflicts" };
+  const STEPS = ["setup", "classes", "electives", "teachers", "students", "analyze", "schedule", "conflicts"];
+  const LABELS = { setup: "School Setup", classes: "Standard Classes", electives: "Electives", teachers: "Teachers", students: "Upload Students", analyze: "Analyze", schedule: "Run Schedule", conflicts: "Conflicts" };
   const isComplete = id => {
     if (id === "setup") return !!(state.schoolName && state.schoolName.trim() && state.periods.length > 0 && state.periods.every(p => p.startTime && p.endTime));
     if (id === "teachers") return true; // optional step — always passable
