@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.9.4";
+const APP_VERSION = "1.9.5";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -2554,6 +2554,19 @@ function ConflictsPage({ state, setState }) {
       return !studentChoiceNames.includes(e.name.toLowerCase());
     });
 
+    // ── Missing classes ────────────────────────────────────────────────────────
+    var assignedNames = Object.values(sched).filter(Boolean).flatMap(function(v) {
+      return v.replace("[E] ", "").split(" | ").map(function(n) { return n.trim().toLowerCase(); });
+    });
+    var missingStd = classes.filter(function(c) {
+      var gradeOk = c.grades && c.grades.length > 0
+        ? c.grades.includes(String(grade))
+        : (!c.gradeLevel || c.gradeLevel === "all" || c.gradeLevel === String(grade));
+      return gradeOk && !assignedNames.includes(c.name.toLowerCase());
+    });
+    var elecSlotsFilled = Object.values(sched).filter(function(v) { return v && v.startsWith("[E] "); }).length;
+    var missingElecCount = Math.max(0, 2 - elecSlotsFilled);
+
     return React.createElement("div", null,
       React.createElement("div", { className: "card", style: { borderColor: "rgba(79,200,255,0.3)", marginBottom: 12 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
@@ -2571,8 +2584,23 @@ function ConflictsPage({ state, setState }) {
         )
       ),
       errors.length > 0 && React.createElement("div", { className: "alert alert-error", style: { marginBottom: 8 } }, errors.map(function(e) { return e.msg; }).join(" · ")),
-      warns.length > 0 && React.createElement("div", { className: "alert alert-warn", style: { marginBottom: 12 } }, warns.map(function(w) { return w.msg; }).join(" · ")),
-      errors.length === 0 && warns.length === 0 && React.createElement("div", { className: "alert alert-success", style: { marginBottom: 12 } }, "Schedule looks complete"),
+      // Missing classes summary
+      (missingStd.length > 0 || missingElecCount > 0) && React.createElement("div", { style: { background: "rgba(255,181,71,0.08)", border: "1px solid rgba(255,181,71,0.3)", borderRadius: 8, padding: "10px 14px", marginBottom: 12 } },
+        React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--accent3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" } }, "Missing"),
+        missingStd.length > 0 && React.createElement("div", { style: { marginBottom: missingElecCount > 0 ? 6 : 0 } },
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text3)", marginRight: 6 } }, "Classes:"),
+          missingStd.map(function(c) {
+            return React.createElement("span", { key: c.id, style: { display: "inline-block", background: "rgba(255,107,107,0.12)", border: "1px solid rgba(255,107,107,0.3)", borderRadius: 4, padding: "1px 7px", fontSize: 11, color: "var(--danger)", marginRight: 4, marginBottom: 2 } }, c.name);
+          })
+        ),
+        missingElecCount > 0 && React.createElement("div", null,
+          React.createElement("span", { style: { fontSize: 10, color: "var(--text3)", marginRight: 6 } }, "Electives:"),
+          Array.from({ length: missingElecCount }).map(function(_, i) {
+            return React.createElement("span", { key: i, style: { display: "inline-block", background: "rgba(255,107,107,0.12)", border: "1px solid rgba(255,107,107,0.3)", borderRadius: 4, padding: "1px 7px", fontSize: 11, color: "var(--danger)", marginRight: 4 } }, "Slot " + (elecSlotsFilled + i + 1) + " unassigned");
+          })
+        )
+      ),
+      errors.length === 0 && missingStd.length === 0 && missingElecCount === 0 && React.createElement("div", { className: "alert alert-success", style: { marginBottom: 12 } }, "Schedule looks complete"),
       React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 16 } },
         periods.map(function(p) {
           var val = sched[p.id];
@@ -2580,11 +2608,31 @@ function ConflictsPage({ state, setState }) {
           var isElec = val && val.startsWith("[E] ");
           var isEmpty = !val;
           var isDup = val && dupNames.has(val);
+
+          // Detect solo semester elective — needs partner picker
+          var soloSemEl = null;
+          if (isElec && !val.includes(" | ")) {
+            var elName = val.replace("[E] ", "");
+            var foundEl = electives.find(function(e) { return e.name.toLowerCase() === elName.toLowerCase(); });
+            if (foundEl && !foundEl.isYearLong && !foundEl.isElaIntervention && !foundEl.isMathIntervention) {
+              soloSemEl = foundEl;
+            }
+          }
+          // Partners: semester electives available in this period, not already assigned
+          var partnerOptions = soloSemEl ? electives.filter(function(e) {
+            if (e.isYearLong || e.isElaIntervention || e.isMathIntervention) return false;
+            if (e.id === soloSemEl.id) return false;
+            if (e.gradeRestriction && parseInt(e.gradeRestriction) !== grade) return false;
+            var avail = (e.availablePeriods || "").split(",").map(function(x) { return x.trim(); }).filter(Boolean);
+            if (avail.length > 0 && !avail.includes(p.id)) return false;
+            return !assignedNames.includes(e.name.toLowerCase());
+          }) : [];
+
           return React.createElement("div", {
             key: p.id,
             style: {
               background: isEdit ? "rgba(79,200,255,0.1)" : isDup ? "rgba(255,181,71,0.12)" : isEmpty ? "rgba(255,107,107,0.05)" : isElec ? "rgba(126,240,162,0.08)" : "var(--surface2)",
-              border: "1px solid " + (isEdit ? "var(--accent2)" : isDup ? "rgba(255,181,71,0.6)" : isEmpty ? "rgba(255,107,107,0.3)" : isElec ? "rgba(126,240,162,0.2)" : "var(--border)"),
+              border: "1px solid " + (isEdit ? "var(--accent2)" : isDup ? "rgba(255,181,71,0.6)" : isEmpty ? "rgba(255,107,107,0.3)" : soloSemEl ? "rgba(255,181,71,0.5)" : isElec ? "rgba(126,240,162,0.2)" : "var(--border)"),
               borderRadius: 8, padding: 12, cursor: "pointer"
             },
             onClick: function() { setEditSlot(isEdit ? null : p.id); }
@@ -2595,8 +2643,33 @@ function ConflictsPage({ state, setState }) {
               val ? val.replace("[E] ", "").replace(" | ", " / ") : "Empty"
             ),
             isDup && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "⚠ Duplicate"),
-            !isDup && isElec && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "Elective"),
-            isEdit && React.createElement("div", { style: { fontSize: 9, color: "var(--accent2)", marginTop: 2 } }, "Editing...")
+            !isDup && isElec && !soloSemEl && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2 } }, "Elective"),
+            soloSemEl && React.createElement("div", { style: { fontSize: 9, color: "var(--accent3)", marginTop: 2, marginBottom: 4 } }, "Semester — needs partner"),
+            isEdit && React.createElement("div", { style: { fontSize: 9, color: "var(--accent2)", marginTop: 2 } }, "Editing..."),
+            // Partner picker — shown inline on solo semester tiles
+            soloSemEl && React.createElement("div", { onClick: function(ev) { ev.stopPropagation(); } },
+              React.createElement("select", {
+                value: "",
+                onChange: function(ev) {
+                  ev.stopPropagation();
+                  var partnerName = ev.target.value;
+                  if (!partnerName) return;
+                  var pid = p.id;
+                  var firstName = soloSemEl.name;
+                  setEditSchedule(function(prev) {
+                    var updated = Object.assign({}, prev);
+                    updated[pid] = "[E] " + firstName + " | " + partnerName;
+                    return updated;
+                  });
+                },
+                style: { fontSize: 10, width: "100%", padding: "3px 4px", marginTop: 4, background: "var(--surface)", border: "1px solid rgba(255,181,71,0.4)", borderRadius: 4, color: "var(--text2)" }
+              },
+                React.createElement("option", { value: "" }, partnerOptions.length ? "＋ Add partner..." : "No partners available"),
+                partnerOptions.map(function(e) {
+                  return React.createElement("option", { key: e.id, value: e.name }, e.name + (studentChoiceNames.includes(e.name.toLowerCase()) ? " ★" : ""));
+                })
+              )
+            )
           );
         })
       ),
