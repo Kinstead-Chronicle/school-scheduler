@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.8.0";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -849,37 +849,117 @@ function TeachersPage({ state, setState }) {
   });
 
   // ── CSV import ─────────────────────────────────────────────────────────────
+  // Supports two formats:
+  // Simple:  Name, Room, P1, P2, P3 ...  (cell value = class name or Plan/N/A)
+  // Color:   Teacher/Room, 8:30-9:38, 8:30-9:38 Color, 9:42-10:32, 9:42-10:32 Color ...
+  //          (alternating class-name / color columns; color drives the status)
   const importCSV = file => {
     setImportError("");
     Papa.parse(file, { header: true, skipEmptyLines: true, complete: res => {
       const rows = res.data;
       const headers = res.meta.fields || [];
       if (!headers.length) { setImportError("CSV appears empty or unreadable."); return; }
-      const nameCol = headers.find(h => /^(name|teacher)$/i.test(h.trim())) || headers[0];
-      const roomCol = headers.find(h => /^room$/i.test(h.trim()));
-      const periodCols = headers.filter(h => h !== nameCol && h !== roomCol);
+
+      const nameCol = headers[0]; // Always first column
+      const isColorFormat = headers.some(h => /color/i.test(h));
+
+      // Build period-column pairs { classCol, colorCol }
+      const dataCols = headers.slice(1);
+      const periodPairs = [];
+      if (isColorFormat) {
+        for (let i = 0; i + 1 < dataCols.length; i += 2) {
+          if (/color/i.test(dataCols[i + 1])) {
+            periodPairs.push({ classCol: dataCols[i], colorCol: dataCols[i + 1] });
+          }
+        }
+      } else {
+        const roomCol = dataCols.find(h => /^room$/i.test(h.trim()));
+        dataCols.filter(h => h !== roomCol).forEach(col => periodPairs.push({ classCol: col, colorCol: null }));
+      }
+
+      // Color → status
+      const colorToStatus = c => {
+        const v = (c || "").toLowerCase().trim();
+        if (v === "green")  return "standard";
+        if (v === "cyan")   return "elective";
+        if (v === "yellow") return "plan";
+        if (v === "white")  return "elementary";
+        if (v === "black")  return "unavailable";
+        return "standard";
+      };
+
+      // Strip annotations like "/ MUST STAY", "???", "/ Room 119"
+      const cleanName = raw => raw
+        .replace(/\/\s*MUST STAY/gi, "")
+        .replace(/\/\s*Room\s*[\w-]+/gi, "")
+        .replace(/\/\s*C-\d+/gi, "")
+        .replace(/\/\s*Stage/gi, "")
+        .replace(/\?+/g, "")
+        .replace(/\/\s*$/, "")
+        .trim();
+
+      // Fuzzy match a class name against a list of {id, name} items
+      const fuzzyMatch = (name, list) => {
+        const low = name.toLowerCase();
+        return list.find(x => x.name.toLowerCase() === low) ||
+               list.find(x => x.name.toLowerCase().includes(low) || low.includes(x.name.toLowerCase()));
+      };
+
+      const allElectives = electives.filter(e => !e.isElaIntervention && !e.isMathIntervention);
+
       const imported = rows.map(row => {
-        const name = (row[nameCol] || "").trim();
-        if (!name) return null;
-        const room = roomCol ? (row[roomCol] || "").trim() : "";
+        const rawCell = (row[nameCol] || "").trim();
+        if (!rawCell) return null;
+
+        // Parse "LastName Room#" — last token is room if it's a number or "Portable"
+        const tokens = rawCell.split(/\s+/);
+        const lastToken = tokens[tokens.length - 1];
+        let name, room;
+        if (tokens.length > 1 && /^\d+$|^portable$/i.test(lastToken)) {
+          room = lastToken; name = tokens.slice(0, -1).join(" ");
+        } else {
+          name = rawCell; room = "";
+        }
+
         const ps = {};
         periods.forEach((p, i) => {
-          const col = periodCols[i];
-          const raw = col ? (row[col] || "").trim() : "";
-          const lower = raw.toLowerCase();
-          let status = "standard";
-          if (!raw || lower === "n/a" || lower === "na" || lower === "away" || lower === "unavailable") status = "unavailable";
-          else if (lower === "plan") status = "plan";
-          else if (lower === "elementary") status = "elementary";
-          ps[p.id] = { status, classId: "" };
+          if (i >= periodPairs.length) { ps[p.id] = { status: "unavailable", classId: "" }; return; }
+          const { classCol, colorCol } = periodPairs[i];
+          const rawClass = (row[classCol] || "").trim();
+          const rawColor = colorCol ? (row[colorCol] || "").trim() : "";
+          const cleaned = cleanName(rawClass);
+          let status;
+          if (colorCol) {
+            status = colorToStatus(rawColor);
+          } else {
+            const low = cleaned.toLowerCase();
+            if (!cleaned || low === "n/a" || low === "na" || low === "away" || low === "unavailable") status = "unavailable";
+            else if (low === "plan") status = "plan";
+            else if (low === "elementary") status = "elementary";
+            else status = "standard";
+          }
+
+          // Fuzzy-match class name to existing classes or electives to pre-fill classId
+          let classId = "";
+          if (cleaned && (status === "standard" || status === "elective")) {
+            const stdMatch = fuzzyMatch(cleaned, classes);
+            const elecMatch = fuzzyMatch(cleaned, allElectives);
+            if (status === "standard" && stdMatch) classId = stdMatch.id;
+            else if (status === "elective" && elecMatch) classId = elecMatch.id;
+            else if (stdMatch) { classId = stdMatch.id; status = "standard"; }
+            else if (elecMatch) { classId = elecMatch.id; status = "elective"; }
+          }
+
+          ps[p.id] = { status, classId };
         });
+
         const existing = (teachers || []).find(t => t.name.toLowerCase() === name.toLowerCase());
         return { id: existing ? existing.id : "teacher_" + Date.now() + "_" + Math.random().toString(36).slice(2), name, room, periods: ps };
       }).filter(Boolean);
-      if (!imported.length) { setImportError("No valid rows found."); return; }
+
+      if (!imported.length) { setImportError("No valid rows found. Check that the first column contains teacher names."); return; }
       setState(s => {
-        const existing = s.teachers || [];
-        const merged = [...existing];
+        const merged = [...(s.teachers || [])];
         imported.forEach(imp => {
           const idx = merged.findIndex(t => t.name.toLowerCase() === imp.name.toLowerCase());
           if (idx >= 0) merged[idx] = imp; else merged.push(imp);
@@ -910,6 +990,7 @@ function TeachersPage({ state, setState }) {
           React.createElement("div", { className: "page-sub" }, "Assign each teacher's schedule by period — constrains which periods each class can run")
         ),
         React.createElement("div", { style: { display: "flex", gap: 8 } },
+          teachers.length > 0 && React.createElement("button", { className: "btn btn-danger", onClick: () => { if (window.confirm("Remove all teachers and clear all teacher assignments?")) setState(s => ({ ...s, teachers: [], classes: (s.classes || []).map(c => ({ ...c, teacherId: "" })), electives: (s.electives || []).map(e => ({ ...e, teacherId: "" })) })); } }, "Clear All"),
           React.createElement("button", { className: "btn btn-ghost", onClick: () => importRef.current && importRef.current.click(), disabled: periods.length === 0 }, "↑ Import CSV"),
           React.createElement("button", { className: "btn btn-primary", onClick: openAdd, disabled: periods.length === 0 }, "+ Add Teacher")
         )
@@ -1045,7 +1126,7 @@ function TeachersPage({ state, setState }) {
                         onChange: e => setPeriodClass(p.id, e.target.value),
                         style: { fontSize: 12 }
                       },
-                        React.createElement("option", { value: "" }, "— " + (status === "standard" ? "Select class" : "Select elective") + " —"),
+                        React.createElement("option", { value: "" }, "— " + (status === "standard" ? "Select class (incl. PEAKS)" : "Select elective") + " —"),
                         pickerOptions.map(item => React.createElement("option", { key: item.id, value: item.id }, item.name))
                       )
                     : React.createElement("div", { style: { fontSize: 11, color: "var(--text3)", padding: "6px 8px" } }, "—")
@@ -1333,7 +1414,7 @@ function ClassesPage({ state, setState }) {
                 React.createElement("input", { type: "number", min: "1", value: form.maxPeriods || "", onChange: e => setForm(f => ({ ...f, maxPeriods: e.target.value })), placeholder: "No limit" })
               )
             ),
-            tab === "standard" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+            tab === "standard" && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } },
               React.createElement("div", null,
                 React.createElement("label", null, "Min Size ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
                 React.createElement("input", { type: "number", min: "0", value: form.minSize || "", onChange: e => setForm(f => ({ ...f, minSize: e.target.value })), placeholder: "No minimum" })
@@ -1344,9 +1425,7 @@ function ClassesPage({ state, setState }) {
                   React.createElement("option", { value: "flag" }, "Flag for review"),
                   React.createElement("option", { value: "reassign" }, "Reassign students to other choices")
                 )
-              )
-            ),
-
+              ),
               React.createElement("div", null,
                 React.createElement("label", null, "Grade Restriction"),
                 React.createElement("select", { value: form.gradeRestriction || "", onChange: e => setForm(f => ({ ...f, gradeRestriction: e.target.value })) },
@@ -1357,7 +1436,6 @@ function ClassesPage({ state, setState }) {
                 )
               )
             ),
-
             React.createElement("div", null,
               React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
                 React.createElement("label", { style: { marginBottom: 0 } }, "Period Hints ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional)")),
