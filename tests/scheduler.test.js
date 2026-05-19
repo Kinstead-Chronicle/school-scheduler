@@ -254,8 +254,223 @@ test('class pinned to one period lands in that period', () => {
   const s = student({ choice_1: 'Art', choice_2: 'Band' });
   const classes = [pinnedMath, ...STD.filter(c => c.name !== 'Math 7')];
   const { assignments } = run([s], [ART, BAND], classes);
-  const a = assignments[0];
-  assert.strictEqual(a.schedule['p1'], 'Math 7', 'Math 7 should be in p1');
+  assert.strictEqual(assignments[0].schedule['p1'], 'Math 7');
+});
+
+test('elective with period hint only runs in that period', () => {
+  // Pin std classes away from p3 so it stays free for Art
+  const pinned = [
+    cls({ name: 'Math 7',           grades: ['7'], category: 'Math',           periods: 'p1' }),
+    cls({ name: 'ELA 7',            grades: ['7'], category: 'ELA',            periods: 'p2' }),
+    cls({ name: 'Science 7',        grades: ['7'], category: 'Science',        periods: 'p4' }),
+    cls({ name: 'Social Studies 7', grades: ['7'], category: 'Social Studies', periods: 'p5' }),
+  ];
+  const p3art = elec({ id: 'art', name: 'Art', isYearLong: true, availablePeriods: 'p3' });
+  const s = student({ choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [p3art, BAND], pinned);
+  const artPid = Object.entries(assignments[0].schedule).find(([, v]) => v === '[E] Art')?.[0];
+  assert.strictEqual(artPid, 'p3', 'Art (hint=p3) should land in p3, got: ' + artPid);
+});
+
+test('elective unavailable in student free periods causes conflict', () => {
+  // All 6 periods will be used by standard classes + one elective;
+  // the second elective is locked to p1 which will be taken by a std class
+  const lockedElec = elec({ name: 'PE', isYearLong: true, availablePeriods: 'p1' });
+  const pinnedStd = cls({ name: 'Math 7', grades: ['7'], category: 'Math', periods: 'p1' });
+  const s = student({ choice_1: 'Art', choice_2: 'PE' });
+  const classes = [pinnedStd, ...STD.filter(c => c.name !== 'Math 7')];
+  const { assignments } = run([s], [ART, lockedElec], classes);
+  // PE (only in p1, taken by std) should not appear in schedule
+  assert.ok(!elecNames(assignments[0]).includes('PE'), 'PE should not be assigned — its only period is blocked');
+});
+
+// ── PEAKS pairs ───────────────────────────────────────────────────────────────
+console.log('\nPEAKS pairs');
+
+test('PEAKS pair classes both appear in student schedule', () => {
+  const pkA = cls({ id: 'pkA', name: 'PEAKS Math', grades: ['7'], category: 'Math' });
+  const pkB = cls({ id: 'pkB', name: 'PEAKS ELA',  grades: ['7'], category: 'ELA'  });
+  const pair = { id: 'pair1', gradeLevel: '7', classAId: 'pkA', classBId: 'pkB' };
+  const rest = STD.filter(c => c.category !== 'Math' && c.category !== 'ELA');
+  const s = student({ choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = runScheduler({ periods: PERIODS, classes: [pkA, pkB, ...rest], electives: [ART, BAND], students: [s], peaksPairs: [pair], teachers: [] });
+  const vals = stdSlots(assignments[0]);
+  assert.ok(vals.includes('PEAKS Math'), 'PEAKS Math should be in schedule');
+  assert.ok(vals.includes('PEAKS ELA'),  'PEAKS ELA should be in schedule');
+});
+
+test('PEAKS pair classes land in consecutive periods', () => {
+  const pkA = cls({ id: 'pkA', name: 'PEAKS Math', grades: ['7'], category: 'Math' });
+  const pkB = cls({ id: 'pkB', name: 'PEAKS ELA',  grades: ['7'], category: 'ELA'  });
+  const pair = { id: 'pair1', gradeLevel: '7', classAId: 'pkA', classBId: 'pkB' };
+  const rest = STD.filter(c => c.category !== 'Math' && c.category !== 'ELA');
+  const s = student({ choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = runScheduler({ periods: PERIODS, classes: [pkA, pkB, ...rest], electives: [ART, BAND], students: [s], peaksPairs: [pair], teachers: [] });
+  const sched = assignments[0].schedule;
+  const pidA = Object.entries(sched).find(([, v]) => v === 'PEAKS Math')?.[0];
+  const pidB = Object.entries(sched).find(([, v]) => v === 'PEAKS ELA')?.[0];
+  assert.ok(pidA && pidB, 'both PEAKS classes must be present');
+  const idxA = PERIODS.findIndex(p => p.id === pidA);
+  const idxB = PERIODS.findIndex(p => p.id === pidB);
+  assert.strictEqual(Math.abs(idxA - idxB), 1, 'PEAKS classes should be in consecutive periods (got indices ' + idxA + ', ' + idxB + ')');
+});
+
+// ── Intervention designation ──────────────────────────────────────────────────
+console.log('\nIntervention designation');
+
+test('ELA Intervention student receives the ELA intervention class', () => {
+  const elaSupport = elec({ name: 'ELA Support', isElaIntervention: true, isYearLong: true });
+  const s = student({ designation: 'ELA Intervention', choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [elaSupport, ART, BAND]);
+  assert.ok(Object.values(assignments[0].schedule).includes('ELA Support'), 'ELA Intervention student should have ELA Support');
+});
+
+test('ELA Intervention class prefers period 1', () => {
+  const elaSupport = elec({ name: 'ELA Support', isElaIntervention: true, isYearLong: true });
+  const s = student({ designation: 'ELA Intervention', choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [elaSupport, ART, BAND]);
+  assert.strictEqual(assignments[0].schedule['p1'], 'ELA Support', 'ELA Support should land in period 1');
+});
+
+test('Math Intervention student receives the Math intervention class', () => {
+  const mathSupport = elec({ name: 'Math Support', isMathIntervention: true, isYearLong: true });
+  const s = student({ designation: 'Math Intervention', choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [mathSupport, ART, BAND]);
+  assert.ok(Object.values(assignments[0].schedule).includes('Math Support'));
+});
+
+// ── Category deduplication ────────────────────────────────────────────────────
+console.log('\nCategory deduplication');
+
+test('student receives only one class per category', () => {
+  const math7  = cls({ name: 'Math 7',     grades: ['7'], category: 'Math' });
+  const algI   = cls({ name: 'Algebra I',  grades: ['7'], category: 'Math' });
+  const s = student({ choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [ART, BAND], [...STD.filter(c => c.category !== 'Math'), math7, algI]);
+  const mathCount = stdSlots(assignments[0]).filter(v => v === 'Math 7' || v === 'Algebra I').length;
+  assert.strictEqual(mathCount, 1, 'student should only have one Math class, got ' + mathCount);
+});
+
+// ── Designation tag on standard classes ──────────────────────────────────────
+console.log('\nDesignation tag — standard class pin');
+
+test('designationTag pins student to the tagged standard class', () => {
+  const honorsMath  = cls({ name: 'Honors Math', grades: ['7'], category: 'Math', designationTag: 'Accelerated' });
+  const regularMath = cls({ name: 'Math 7',       grades: ['7'], category: 'Math' });
+  const s = student({ designation: 'Accelerated', choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [ART, BAND], [...STD.filter(c => c.category !== 'Math'), honorsMath, regularMath]);
+  assert.ok( stdSlots(assignments[0]).includes('Honors Math'), 'Accelerated student should get Honors Math');
+  assert.ok(!stdSlots(assignments[0]).includes('Math 7'),      'Accelerated student should NOT also get Math 7');
+});
+
+test('designationTag pin blocks a second class in the same category', () => {
+  const honorsMath  = cls({ name: 'Honors Math', grades: ['7'], category: 'Math', designationTag: 'Accelerated' });
+  const regularMath = cls({ name: 'Math 7',       grades: ['7'], category: 'Math' });
+  const s = student({ designation: 'Accelerated', choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [ART, BAND], [...STD.filter(c => c.category !== 'Math'), honorsMath, regularMath]);
+  const mathClasses = stdSlots(assignments[0]).filter(v => v === 'Honors Math' || v === 'Math 7');
+  assert.strictEqual(mathClasses.length, 1, 'only one Math class total, got: ' + mathClasses.join(', '));
+});
+
+// ── underMin reporting ────────────────────────────────────────────────────────
+console.log('\nunderMin reporting');
+
+test('elective below its minimum appears in underMin result', () => {
+  const rareArt = elec({ name: 'Rare Art', isYearLong: true, minSize: '10' });
+  const s = student({ choice_1: 'Rare Art', choice_2: 'Band' });
+  const { underMin } = run([s], [rareArt, BAND]);
+  assert.ok(underMin.some(u => u.item.name === 'Rare Art'), 'Rare Art should appear in underMin');
+});
+
+test('elective with zero enrollment does NOT appear in underMin', () => {
+  const rareArt = elec({ name: 'Rare Art', isYearLong: true, minSize: '10' });
+  const s = student({ choice_1: 'Band', choice_2: 'PE' });
+  const { underMin } = run([s], [rareArt, BAND, PE]);
+  assert.ok(!underMin.some(u => u.item.name === 'Rare Art'), 'Zero-enrollment elective should not appear in underMin');
+});
+
+test('underMin entry contains correct shortage count', () => {
+  const rareArt = elec({ name: 'Rare Art', isYearLong: true, minSize: '5' });
+  const students = [
+    student({ choice_1: 'Rare Art', choice_2: 'Band' }),
+    student({ choice_1: 'Rare Art', choice_2: 'PE' }),
+  ];
+  const { underMin } = run(students, [rareArt, BAND, PE]);
+  const entry = underMin.find(u => u.item.name === 'Rare Art');
+  assert.ok(entry, 'Rare Art should appear in underMin');
+  assert.strictEqual(entry.totalEnrolled, 2, 'totalEnrolled should be 2');
+  assert.strictEqual(entry.shortage, 3, 'shortage should be 3 (need 5, have 2)');
+});
+
+// ── maxPeriods concentration ──────────────────────────────────────────────────
+console.log('\nmaxPeriods concentration');
+
+test('elective with maxPeriods=1 runs in only one period across all students', () => {
+  const singleArt = elec({ id: 'art', name: 'Art', isYearLong: true, maxPeriods: '1' });
+  const students = Array.from({ length: 5 }, (_, i) =>
+    student({ student_id: 'mp' + i, choice_1: 'Art', choice_2: 'Band' })
+  );
+  const { assignments } = run(students, [singleArt, BAND]);
+  const artPids = new Set();
+  assignments.forEach(a => {
+    Object.entries(a.schedule).forEach(([pid, v]) => { if (v === '[E] Art') artPids.add(pid); });
+  });
+  assert.strictEqual(artPids.size, 1, 'Art (maxPeriods=1) should only run in 1 period, ran in: ' + [...artPids].join(', '));
+});
+
+// ── Multiple grades ───────────────────────────────────────────────────────────
+console.log('\nMultiple grades');
+
+test('each grade gets its own grade-level standard classes', () => {
+  const math6 = cls({ name: 'Math 6', grades: ['6'], category: 'Math' });
+  const math7 = cls({ name: 'Math 7', grades: ['7'], category: 'Math' });
+  const math8 = cls({ name: 'Math 8', grades: ['8'], category: 'Math' });
+  const shared = ['ELA','Science','Social Studies'].map(n => cls({ name: n, grades: ['6','7','8'], category: n }));
+  const students = ['6','7','8'].map(g => student({ grade: g, choice_1: 'Art', choice_2: 'Band' }));
+  const { assignments } = run(students, [ART, BAND], [math6, math7, math8, ...shared]);
+  ['6','7','8'].forEach(g => {
+    const a = assignments.find(x => x.student.grade === g);
+    assert.ok( stdSlots(a).includes('Math ' + g), 'grade ' + g + ' should have Math ' + g);
+    assert.ok(!stdSlots(a).includes('Math ' + (parseInt(g) === 8 ? 6 : parseInt(g) + 1)), 'grade ' + g + ' should not have a different grade Math');
+  });
+});
+
+// ── Partial and full conflicts ────────────────────────────────────────────────
+console.log('\nPartial and full conflicts');
+
+test('partial conflict when student has only one listed choice', () => {
+  const s = student({ choice_1: 'Art' }); // no choice_2
+  const { conflicts } = run([s], [ART, BAND]);
+  assert.ok(conflicts.some(c => c.partial === true), 'should generate a partial conflict');
+});
+
+test('full conflict when all listed choices are full', () => {
+  // maxSize=1, maxPeriods=1 means exactly 1 student ever gets Art
+  const tinyArt = elec({ name: 'Art', isYearLong: true, maxSize: '1', maxPeriods: '1' });
+  const s1 = student({ student_id: 'first',  choice_1: 'Art', choice_2: 'Band' });
+  const s2 = student({ student_id: 'second', choice_1: 'Art' });               // only choice, will be full
+  const { conflicts } = run([s1, s2], [tinyArt, BAND]);
+  assert.ok(conflicts.some(c => c.student.student_id === 'second'), 'second student should have a conflict');
+});
+
+// ── Semester partner gating ───────────────────────────────────────────────────
+console.log('\nSemester partner gating');
+
+test('requiresTag semester elective is not used as partner for ineligible student', () => {
+  const semArt  = elec({ name: 'Art',  isYearLong: false });
+  const gatedBand = elec({ name: 'Band', isYearLong: false, requiresTag: 'Band Eligible' });
+  const semPE   = elec({ name: 'PE',   isYearLong: false }); // eligible fallback partner
+  const s = student({ designation: '', choice_1: 'Art', choice_2: 'Band' }); // not Band Eligible
+  const { assignments } = run([s], [semArt, gatedBand, semPE]);
+  assert.ok(!elecNames(assignments[0]).includes('Band'), 'ineligible student should not receive gated Band as partner');
+});
+
+test('requiresTag semester elective IS used as partner for eligible student', () => {
+  const semArt    = elec({ name: 'Art',  isYearLong: false });
+  const gatedBand = elec({ name: 'Band', isYearLong: false, requiresTag: 'Band Eligible' });
+  const s = student({ designation: 'Band Eligible', choice_1: 'Art', choice_2: 'Band' });
+  const { assignments } = run([s], [semArt, gatedBand]);
+  assert.ok(elecNames(assignments[0]).includes('Band'), 'eligible student should receive gated Band as partner');
 });
 
 // ── Multiple students ─────────────────────────────────────────────────────────
