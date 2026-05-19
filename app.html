@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.9.7";
+const APP_VERSION = "1.9.8";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -537,18 +537,15 @@ function runScheduler(state) {
     electives.filter(e => e.designationTag && desigs.includes(e.designationTag.trim()) && !e.isElaIntervention && !e.isMathIntervention)
       .forEach(el => tryElective(el, false));
 
-    // Pass 1: prioritize choices that are below minimum (concentrate students there)
+    // Single ranked pass: try choices in strict ranked order.
+    // If the elective is under-minimum, use getBestSlot (concentrates enrollment
+    // into the most-populated section). Collapsing the old 2-pass structure ensures
+    // a student's choice_1 is always attempted before choice_2, even when choice_2
+    // would have been "prioritized" by the old Pass 1 for being under-min.
     for (const choice of choices) {
       if (elecSlotsUsed() >= NUM_ELECTIVES) break;
       const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
-      if (el && isUnderMin(el)) tryElective(el, true);
-    }
-
-    // Pass 2: fill remaining slots by ranked preference
-    for (const choice of choices) {
-      if (elecSlotsUsed() >= NUM_ELECTIVES) break;
-      const el = electives.find(e => e.name.toLowerCase() === choice.toLowerCase() && !e.isElaIntervention && !e.isMathIntervention);
-      if (el) tryElective(el, false);
+      if (el) tryElective(el, isUnderMin(el));
     }
 
     if (assigned.length === 0 && choices.length > 0) {
@@ -2638,6 +2635,7 @@ function ConflictsPage({ state, setState }) {
             }
           }
           // Partners: semester electives available in this period, not already assigned, student eligible
+          // Sorted: student's ranked choices first (by rank), then all others alphabetically
           var partnerOptions = soloSemEl ? electives.filter(function(e) {
             if (e.isYearLong || e.isElaIntervention || e.isMathIntervention) return false;
             if (e.id === soloSemEl.id) return false;
@@ -2646,6 +2644,13 @@ function ConflictsPage({ state, setState }) {
             var avail = (e.availablePeriods || "").split(",").map(function(x) { return x.trim(); }).filter(Boolean);
             if (avail.length > 0 && !avail.includes(p.id)) return false;
             return !assignedNames.includes(e.name.toLowerCase());
+          }).sort(function(a, b) {
+            var ai = studentChoiceNames.indexOf(a.name.toLowerCase());
+            var bi = studentChoiceNames.indexOf(b.name.toLowerCase());
+            if (ai === -1 && bi === -1) return a.name.localeCompare(b.name);
+            if (ai === -1) return 1;
+            if (bi === -1) return -1;
+            return ai - bi;
           }) : [];
 
           return React.createElement("div", {
