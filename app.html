@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.9.6";
+const APP_VERSION = "1.9.7";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -413,7 +413,7 @@ function runScheduler(state) {
       });
 
     // Step 3: Single-period-locked standard classes
-    gradeClasses.filter(c => !pairedIds.has(c.id) && singlePeriod.has(c.id))
+    gradeClasses.filter(c => !pairedIds.has(c.id) && singlePeriod.has(c.id) && (!c.requiresTag || desigs.includes(c.requiresTag.trim())))
       .sort((a, b) => (classPMap[a.id]||[]).length - (classPMap[b.id]||[]).length)
       .forEach(cls => {
         if (stdCount >= MAX_STANDARD) return;
@@ -423,7 +423,7 @@ function runScheduler(state) {
       });
 
     // Step 4: Remaining standard classes
-    gradeClasses.filter(c => !pairedIds.has(c.id) && !singlePeriod.has(c.id))
+    gradeClasses.filter(c => !pairedIds.has(c.id) && !singlePeriod.has(c.id) && (!c.requiresTag || desigs.includes(c.requiresTag.trim())))
       .sort((a, b) => (classPMap[a.id]||pids).length - (classPMap[b.id]||pids).length)
       .forEach(cls => {
         if (stdCount >= MAX_STANDARD) return;
@@ -446,6 +446,7 @@ function runScheduler(state) {
         if (!el) continue;
         if (assigned.includes(el.name)) continue;
         if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) continue;
+        if (el.requiresTag && !desigs.includes(el.requiresTag.trim())) continue;
         const avail = electivePMap[el.id] || pids;
         if (avail.includes(pid) && canAssignFor(el, pid, used)) return el;
       }
@@ -455,6 +456,7 @@ function runScheduler(state) {
         if (el.isYearLong || el.isElaIntervention || el.isMathIntervention) continue;
         if (assigned.includes(el.name)) continue;
         if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) continue;
+        if (el.requiresTag && !desigs.includes(el.requiresTag.trim())) continue;
         const avail = electivePMap[el.id] || pids;
         if (avail.includes(pid) && canAssignFor(el, pid, used)) return el;
       }
@@ -465,6 +467,7 @@ function runScheduler(state) {
       if (elecSlotsUsed() >= NUM_ELECTIVES) return false;
       if (!el || el.isElaIntervention || el.isMathIntervention) return false;
       if (el.gradeRestriction && parseInt(el.gradeRestriction) !== grade) return false;
+      if (el.requiresTag && !desigs.includes(el.requiresTag.trim())) return false;
       if (assigned.includes(el.name)) return false;
       const avail = electivePMap[el.id] || pids;
       const openSlots = avail.filter(p => !used.has(p) && canAssignFor(el, p, used));
@@ -1591,9 +1594,15 @@ function ClassesPage({ state, setState }) {
                 })
               )
             ),
-            React.createElement("div", null,
-              React.createElement("label", null, "Designation Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional — pins students with this designation to this class)")),
-              React.createElement("input", { value: form.designationTag || "", onChange: e => setForm(f => ({ ...f, designationTag: e.target.value })), placeholder: "e.g. Algebra 1, Bio Honors" })
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+              React.createElement("div", null,
+                React.createElement("label", null, "Designation Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(assigns students with this tag)")),
+                React.createElement("input", { value: form.designationTag || "", onChange: e => setForm(f => ({ ...f, designationTag: e.target.value })), placeholder: "e.g. Accelerated" })
+              ),
+              React.createElement("div", null,
+                React.createElement("label", null, "Requires Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(student must have this to be eligible)")),
+                React.createElement("input", { value: form.requiresTag || "", onChange: e => setForm(f => ({ ...f, requiresTag: e.target.value })), placeholder: "e.g. Algebra Honors Eligible" })
+              )
             )
           ),
           React.createElement("div", { className: "modal-actions" },
@@ -2063,9 +2072,15 @@ function ElectivesPage({ state, setState }) {
               })
             )
           ),
-          React.createElement("div", null,
-            React.createElement("label", null, "Designation Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(optional — pins students with this designation to this elective)")),
-            React.createElement("input", { value: form.designationTag || "", onChange: e => setForm(f => ({ ...f, designationTag: e.target.value })), placeholder: "e.g. Band 2/3, Art Track" })
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+            React.createElement("div", null,
+              React.createElement("label", null, "Designation Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(assigns students with this tag)")),
+              React.createElement("input", { value: form.designationTag || "", onChange: e => setForm(f => ({ ...f, designationTag: e.target.value })), placeholder: "e.g. Band Track" })
+            ),
+            React.createElement("div", null,
+              React.createElement("label", null, "Requires Tag ", React.createElement("span", { style: { color: "var(--text3)", fontWeight: "normal" } }, "(student must have this to be eligible)")),
+              React.createElement("input", { value: form.requiresTag || "", onChange: e => setForm(f => ({ ...f, requiresTag: e.target.value })), placeholder: "e.g. Band 2 Eligible" })
+            )
           )
         ),
         React.createElement("div", { className: "modal-actions" },
@@ -2541,9 +2556,11 @@ function ConflictsPage({ state, setState }) {
       var cv = a.student["choice_" + ci];
       if (cv && cv.trim()) studentChoiceNames.push(cv.trim().toLowerCase());
     }
+    var desigs = (a.student.designation || "").split("|").map(function(d) { return d.trim(); }).filter(Boolean);
     var eligibleElectives = electives.filter(function(e) {
       return !e.isElaIntervention && !e.isMathIntervention &&
-        (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade);
+        (!e.gradeRestriction || parseInt(e.gradeRestriction) === grade) &&
+        (!e.requiresTag || desigs.includes(e.requiresTag.trim()));
     });
     var myChoiceElectives = eligibleElectives.filter(function(e) {
       return studentChoiceNames.includes(e.name.toLowerCase());
@@ -2562,7 +2579,9 @@ function ConflictsPage({ state, setState }) {
       var gradeOk = c.grades && c.grades.length > 0
         ? c.grades.includes(String(grade))
         : (!c.gradeLevel || c.gradeLevel === "all" || c.gradeLevel === String(grade));
-      return gradeOk && !assignedNames.includes(c.name.toLowerCase());
+      if (!gradeOk) return false;
+      if (c.requiresTag && !desigs.includes(c.requiresTag.trim())) return false;
+      return !assignedNames.includes(c.name.toLowerCase());
     });
     var elecSlotsFilled = Object.values(sched).filter(function(v) { return v && v.startsWith("[E] "); }).length;
     var missingElecCount = Math.max(0, 2 - elecSlotsFilled);
@@ -2618,11 +2637,12 @@ function ConflictsPage({ state, setState }) {
               soloSemEl = foundEl;
             }
           }
-          // Partners: semester electives available in this period, not already assigned
+          // Partners: semester electives available in this period, not already assigned, student eligible
           var partnerOptions = soloSemEl ? electives.filter(function(e) {
             if (e.isYearLong || e.isElaIntervention || e.isMathIntervention) return false;
             if (e.id === soloSemEl.id) return false;
             if (e.gradeRestriction && parseInt(e.gradeRestriction) !== grade) return false;
+            if (e.requiresTag && !desigs.includes(e.requiresTag.trim())) return false;
             var avail = (e.availablePeriods || "").split(",").map(function(x) { return x.trim(); }).filter(Boolean);
             if (avail.length > 0 && !avail.includes(p.id)) return false;
             return !assignedNames.includes(e.name.toLowerCase());
