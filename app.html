@@ -107,7 +107,7 @@ tr:last-child td { border-bottom: none; }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const APP_VERSION = "1.9.5";
+const APP_VERSION = "1.9.6";
 const VERSION_URL = "https://kinstead-chronicle.github.io/school-scheduler/version.json";
 const APP_URL = "https://kinstead-chronicle.github.io/school-scheduler/app.html";
 const STORAGE_KEY = "school_scheduler_v1";
@@ -2947,6 +2947,50 @@ function App() {
     return true;
   };
   const conflictCount = state.runs[0] && state.runs[0].result && state.runs[0].result.conflicts ? state.runs[0].result.conflicts.length : 0;
+
+  async function saveSession() {
+    const date = new Date().toISOString().slice(0, 10);
+    const school = (state.schoolName || "session").replace(/[^a-z0-9]/gi, "-").toLowerCase();
+    const filename = school + "-" + date + ".json";
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    if (window.showSaveFilePicker) {
+      try {
+        const fh = await window.showSaveFilePicker({ suggestedName: filename, types: [{ description: "Scheduler Session", accept: { "application/json": [".json"] } }] });
+        const w = await fh.createWritable();
+        await w.write(blob);
+        await w.close();
+        return;
+      } catch(e) { if (e.name === "AbortError") return; }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function loadSession() {
+    if (!window.confirm("Load a saved session? This will replace all current data on this device.")) return;
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = ".json";
+    input.onchange = function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        try {
+          const parsed = JSON.parse(ev.target.result);
+          if (!parsed || typeof parsed !== "object" || (!("students" in parsed) && !("classes" in parsed))) {
+            alert("This doesn't look like a valid scheduler session file.");
+            return;
+          }
+          setState({ ...BLANK, ...parsed });
+        } catch { alert("Could not read session file — it may be corrupted."); }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
   const idx = STEPS.indexOf(page);
   const nextPage = STEPS[idx + 1];
   return (
@@ -2978,6 +3022,16 @@ function App() {
           React.createElement("div", { className: "sidebar-footer" },
             React.createElement("div", null, "v" + APP_VERSION),
             React.createElement("div", { style: { marginTop: 2 } }, "School Scheduler"),
+            React.createElement("div", { style: { marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6 } },
+              React.createElement("button", {
+                onClick: saveSession,
+                style: { background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--accent)", fontSize: 11, fontFamily: "var(--mono)", padding: "6px 10px", cursor: "pointer", textAlign: "left", width: "100%" }
+              }, "⬇ Save Session"),
+              React.createElement("button", {
+                onClick: loadSession,
+                style: { background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text2)", fontSize: 11, fontFamily: "var(--mono)", padding: "6px 10px", cursor: "pointer", textAlign: "left", width: "100%" }
+              }, "⬆ Load Session")
+            ),
             React.createElement("div", { style: { marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" } },
               React.createElement("div", { style: { color: "var(--accent)", fontSize: 10, display: "flex", alignItems: "center", gap: 5 } }, "🔒 Data stays on this device"),
               React.createElement("div", { style: { color: "var(--text3)", fontSize: 9, marginTop: 3, lineHeight: 1.5 } }, "No student data is sent to any server. All processing happens locally in your browser.")
